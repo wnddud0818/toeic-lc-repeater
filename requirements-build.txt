@@ -1,0 +1,5 @@
+# 맥 앱 빌드용 (build_app.sh가 .venv에 설치). 서버·처리 코드 자체는 표준 라이브러리만 쓴다.
+pyinstaller==6.22.3
+pywebview==6.2.1
+cmake==4.4.4
+certifi==2026.10.18

@@ -77,13 +77,87 @@ window.addEventListener('drop', e => e.preventDefault());
 // ---------- 라우터 ----------
 
 let cleanup = null;
-function route() {
+let setup = null;          // /api/setup 결과. 모델이 준비되면 다시 묻지 않는다
+let setupSkipped = false;  // 모델 없이 이미 처리한 음원만 보겠다고 했을 때
+async function route() {
   if (cleanup) { cleanup(); cleanup = null; }
   window.scrollTo(0, 0);
   const m = location.hash.match(/^#\/l\/([\w-]+)/);
-  if (m) showLesson(m[1]); else showHome();
+  if (m) { showLesson(m[1]); return; }
+  if (!setup || !setup.model.ready) {
+    try { setup = await api('/api/setup'); } catch (e) { setup = null; }
+    if (setup && !setup.model.ready && !setupSkipped) { showSetup(); return; }
+  }
+  showHome();
 }
 window.addEventListener('hashchange', route);
+
+// ---------- 첫 실행: 모델 내려받기 ----------
+
+const MB = 1024 * 1024;
+
+function showSetup() {
+  $crumb.textContent = '처음 준비';
+  $app.innerHTML = `
+    <div class="working setup">
+      <h2>처음 한 번, 음성 인식 모델을 내려받을게요</h2>
+      <p>Whisper large-v3-turbo (약 547MB)를 huggingface.co에서 받아 이 맥에만 저장합니다.
+         중간에 끊기면 받은 데까지 이어서 받습니다.</p>
+      <div class="progress"><i id="dlbar" style="width:0%"></i></div>
+      <p id="dltext" class="dl-text"></p>
+      <p id="dlerror" class="error-text" hidden></p>
+      <div><button class="btn solid" id="dlbtn">내려받기</button></div>
+      <p id="skip" hidden><a href="#/">건너뛰고 이미 처리한 음원 보기</a></p>
+      ${setup && !setup.claude ? `<p class="note">번역에는 Claude Code가 필요해요. 설치하고 터미널에서 <code>claude</code>를 실행해 로그인해 두면
+         자동으로 번역이 붙습니다. 없어도 문장 반복은 쓸 수 있어요.</p>` : ''}
+    </div>`;
+
+  let alive = true;
+  let timer = null;
+  cleanup = () => { alive = false; clearTimeout(timer); };
+
+  function render(st) {
+    const pct = st.total ? st.received / st.total * 100 : 0;
+    $('#dlbar').style.width = pct.toFixed(1) + '%';
+    $('#dltext').textContent = st.downloading || st.received
+      ? `${Math.round(st.received / MB)}MB${st.total ? ' / ' + Math.round(st.total / MB) + 'MB (' + Math.floor(pct) + '%)' : ''}`
+      : '';
+    const err = $('#dlerror');
+    err.hidden = !st.error;
+    err.textContent = st.error ? '내려받지 못했어요: ' + st.error : '';
+    const btn = $('#dlbtn');
+    btn.disabled = st.downloading;
+    btn.textContent = st.downloading ? '내려받는 중…' : (st.error || st.received ? '이어서 받기' : '내려받기');
+  }
+
+  async function poll() {
+    let s;
+    try { s = await api('/api/setup'); } catch (e) { s = null; }
+    if (!alive) return;
+    if (s) {
+      setup = s;
+      if (s.model.ready) { toast('준비가 끝났어요'); route(); return; }
+      render(s.model);
+      if (!s.model.downloading) return;     // 끝났거나 실패하면 폴링 멈춤
+    }
+    timer = setTimeout(poll, 700);
+  }
+
+  $('#dlbtn').addEventListener('click', async () => {
+    try {
+      render(await api('/api/setup/download', { method: 'POST' }));
+    } catch (e) {
+      toast('시작하지 못했어요: ' + e.message);
+      return;
+    }
+    clearTimeout(timer);
+    timer = setTimeout(poll, 500);
+  });
+  $('#skip a').addEventListener('click', e => { e.preventDefault(); setupSkipped = true; route(); });
+  api('/api/lessons').then(list => { if (alive && list.length) $('#skip').hidden = false; }).catch(() => {});
+  if (setup) render(setup.model);
+  if (setup && setup.model.downloading) poll();
+}
 
 // ---------- 홈 ----------
 
@@ -108,9 +182,12 @@ function showHome() {
       <div class="drop-title">mp3 파일을 끌어다 놓거나 눌러서 고르세요</div>
       <div class="drop-sub">음성 인식 → 문장 나누기 → 한국어 번역까지 자동으로 합니다</div>
     </label>
+    ${setup && !setup.model.ready ? `<div class="banner" style="margin-top:12px"><span class="msg">음성 인식 모델이 없어서 새 음원은 아직 올릴 수 없어요.</span>
+      <button class="btn" id="toSetup">모델 내려받기</button></div>` : ''}
     <div class="section-title">내 음원</div>
     <ul class="lessons" id="lessons"><li class="empty">불러오는 중…</li></ul>`;
 
+  if ($('#toSetup')) $('#toSetup').addEventListener('click', () => { setupSkipped = false; route(); });
   const drop = $('#drop');
   const input = $('#file');
   input.addEventListener('change', () => { uploadFiles(input.files); input.value = ''; });

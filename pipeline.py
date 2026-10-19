@@ -4,7 +4,7 @@
     python3 pipeline.py 파일.mp3 [--title 제목] [--no-translate]
 
 처리 순서
-  1. ffmpeg로 재생용 master.wav(32kHz 모노)와 인식용 16kHz wav를 만든다.
+  1. 맥 내장 afconvert로 재생용 master.wav(32kHz 모노)와 인식용 16kHz wav를 만든다.
   2. whisper.cpp로 받아쓰기(토큰별 DTW 시간 포함).
   3. 문장부호와 무음 구간으로 문장을 나누고, 경계를 무음 구간 안으로 맞춘다.
   4. `claude -p`로 문장 목록을 한 번에 번역한다.
@@ -13,6 +13,7 @@ import argparse
 import array
 import io
 import json
+import math
 import os
 import re
 import shutil
@@ -25,7 +26,13 @@ import wave
 from concurrent.futures import ThreadPoolExecutor
 
 ROOT = os.path.dirname(os.path.abspath(__file__))
-DATA_DIR = os.path.join(ROOT, 'data')
+# PyInstaller로 묶은 앱이면 함께 넣은 파일(static/, bin/)은 여기에 있다
+BUNDLE_DIR = getattr(sys, '_MEIPASS', ROOT)
+DATA_DIR = os.environ.get('LCR_DATA_DIR') or os.path.join(ROOT, 'data')
+
+MODEL_NAME = 'ggml-large-v3-turbo-q5_0.bin'
+MODEL_URL = os.environ.get('LCR_MODEL_URL') or \
+    'https://huggingface.co/ggerganov/whisper.cpp/resolve/main/' + MODEL_NAME
 
 MASTER_RATE = 32000
 PAD_START = 0.12   # 문장 시작 앞 여유(초)
@@ -58,26 +65,63 @@ STAGES = {
 
 # ---------- 도구 경로 ----------
 
-def find_bin(name, env_key):
+def find_bin(name, env_key, login_shell=False):
+    """실행 파일 경로. 없으면 None.
+
+    Finder에서 연 앱은 PATH가 /usr/bin:/bin 정도라 Homebrew 경로를 따로 보고,
+    그래도 없으면 로그인 셸에게 물어본다(npm·nvm 등으로 설치한 claude).
+    """
     if os.environ.get(env_key):
         return os.environ[env_key]
     found = shutil.which(name)
     if found:
         return found
-    # 앱/런처에서 실행하면 PATH에 Homebrew 경로가 빠져 있을 수 있다
     for d in ('/opt/homebrew/bin', '/usr/local/bin', os.path.expanduser('~/.local/bin')):
         p = os.path.join(d, name)
         if os.path.exists(p):
             return p
-    return name
+    if login_shell:
+        shell = os.environ.get('SHELL') or '/bin/zsh'
+        try:
+            out = subprocess.run([shell, '-ilc', 'command -v ' + name],
+                                 stdin=subprocess.DEVNULL, stdout=subprocess.PIPE,
+                                 stderr=subprocess.DEVNULL, universal_newlines=True, timeout=8).stdout
+            for line in reversed(out.splitlines()):
+                line = line.strip()
+                if line.startswith('/') and os.path.exists(line):
+                    return line
+        except (OSError, subprocess.SubprocessError):
+            pass
+    return None
 
 
+def bundled_whisper():
+    p = os.path.join(BUNDLE_DIR, 'bin', 'whisper-cli')
+    return p if os.path.exists(p) else None
+
+
+AFCONVERT = find_bin('afconvert', 'AFCONVERT_BIN')
 FFMPEG = find_bin('ffmpeg', 'FFMPEG_BIN')
-WHISPER = find_bin('whisper-cli', 'WHISPER_BIN')
-CLAUDE = find_bin('claude', 'CLAUDE_BIN')
-WHISPER_MODEL = os.environ.get(
-    'WHISPER_MODEL', os.path.join(ROOT, 'models', 'ggml-large-v3-turbo-q5_0.bin'))
+WHISPER = os.environ.get('WHISPER_BIN') or bundled_whisper() or find_bin('whisper-cli', 'WHISPER_BIN')
+WHISPER_MODEL = os.environ.get('WHISPER_MODEL') or os.path.join(ROOT, 'models', MODEL_NAME)
 CLAUDE_MODEL = os.environ.get('CLAUDE_MODEL', 'sonnet')
+_claude = []
+
+
+def claude_bin():
+    """claude CLI 경로(처음 한 번만 찾는다). 없으면 None."""
+    if not _claude:
+        _claude.append(find_bin('claude', 'CLAUDE_BIN', login_shell=True))
+    return _claude[0]
+
+
+def configure(data_dir=None, model_path=None):
+    """앱에서 데이터·모델 위치를 바꿀 때 쓴다."""
+    global DATA_DIR, WHISPER_MODEL
+    if data_dir:
+        DATA_DIR = data_dir
+    if model_path:
+        WHISPER_MODEL = model_path
 
 
 # ---------- 레슨 폴더와 상태 ----------
@@ -122,6 +166,17 @@ def set_status(d, stage, frac=0.0, error=None):
 # ---------- 1. 오디오 준비 ----------
 
 def decode(src, dst, rate):
+    """오디오를 16비트 모노 WAV로. 맥 내장 afconvert를 쓰고, 못 읽는 형식(ogg 등)만 ffmpeg로."""
+    if AFCONVERT:
+        proc = subprocess.run([AFCONVERT, '-f', 'WAVE', '-d', 'LEI16@%d' % rate, '-c', '1', src, dst],
+                              stdout=subprocess.PIPE, stderr=subprocess.STDOUT, universal_newlines=True)
+        if proc.returncode == 0:
+            return
+        if not FFMPEG:
+            raise RuntimeError('이 오디오 형식은 읽을 수 없습니다(mp3, m4a, wav를 써 주세요): '
+                               + proc.stdout.strip()[-300:])
+    if not FFMPEG:
+        raise RuntimeError('오디오 변환 도구(afconvert 또는 ffmpeg)가 없습니다')
     subprocess.run(
         [FFMPEG, '-nostdin', '-loglevel', 'error', '-y', '-i', src,
          '-ac', '1', '-ar', str(rate), '-c:a', 'pcm_s16le', dst],
@@ -133,34 +188,53 @@ def wav_duration(path):
         return w.getnframes() / float(w.getframerate())
 
 
-def detect_silences(path, min_dur=0.15):
-    """무음 구간 [(시작, 끝), ...]. 기준 음량은 파일 평균 음량에서 정한다."""
-    out = subprocess.run(
-        [FFMPEG, '-nostdin', '-nostats', '-i', path, '-af', 'volumedetect', '-f', 'null', '-'],
-        stderr=subprocess.PIPE, stdout=subprocess.DEVNULL, universal_newlines=True).stderr
-    m = re.search(r'mean_volume:\s*(-?[\d.]+) dB', out)
-    mean = float(m.group(1)) if m else -20.0
-    noise = max(-50.0, min(-28.0, mean - 16.0))
+def detect_silences(path, min_dur=0.15, window=0.01):
+    """무음 구간 [(시작, 끝), ...].
 
-    out = subprocess.run(
-        [FFMPEG, '-nostdin', '-nostats', '-i', path,
-         '-af', 'silencedetect=noise=%.1fdB:d=%.2f' % (noise, min_dur), '-f', 'null', '-'],
-        stderr=subprocess.PIPE, stdout=subprocess.DEVNULL, universal_newlines=True).stderr
-    silences, start = [], None
-    for kind, val in re.findall(r'silence_(start|end): (-?[\d.]+)', out):
-        if kind == 'start':
-            start = max(0.0, float(val))
-        elif start is not None:
-            silences.append((start, float(val)))
-            start = None
-    if start is not None:
-        silences.append((start, wav_duration(path)))
-    return silences
+    10ms 창마다 최대 진폭을 보고, 기준 음량보다 작은 창이 min_dur 이상 이어지면 무음으로 본다.
+    기준 음량은 파일 평균 음량(RMS)보다 16dB 낮게 잡는다(-50~-28dB 사이).
+    """
+    with wave.open(path, 'rb') as w:
+        rate = w.getframerate()
+        samples = array.array('h')
+        samples.frombytes(w.readframes(w.getnframes()))
+    if sys.byteorder == 'big':
+        samples.byteswap()
+    if not samples:
+        return []
+
+    step = 8   # 평균 음량은 솎아서 계산해도 충분하다
+    sub = samples[::step]
+    mean_sq = sum(x * x for x in sub) / float(len(sub))
+    mean_db = 10 * math.log10(mean_sq / 32768.0 ** 2) if mean_sq > 0 else -90.0
+    noise_db = max(-50.0, min(-28.0, mean_db - 16.0))
+    limit = 32768.0 * 10 ** (noise_db / 20.0)
+
+    win = max(1, int(rate * window))
+    need = int(round(min_dur / window))
+    silences, run_start = [], None
+    n_win = (len(samples) + win - 1) // win
+    for k in range(n_win):
+        chunk = samples[k * win:(k + 1) * win]
+        quiet = max(max(chunk), -min(chunk)) < limit
+        if quiet and run_start is None:
+            run_start = k
+        elif not quiet and run_start is not None:
+            if k - run_start >= need:
+                silences.append((run_start * window, k * window))
+            run_start = None
+    if run_start is not None and n_win - run_start >= need:
+        silences.append((run_start * window, len(samples) / float(rate)))
+    return [(round(s, 3), round(e, 3)) for s, e in silences]
 
 
 # ---------- 2. 받아쓰기 ----------
 
 def transcribe(wav16, out_prefix, on_progress=None):
+    if not WHISPER:
+        raise RuntimeError('whisper-cli를 찾을 수 없습니다. ./setup.sh 를 먼저 실행하세요.')
+    if not os.path.isfile(WHISPER_MODEL):
+        raise RuntimeError('Whisper 모델이 없습니다: ' + WHISPER_MODEL)
     cmd = [WHISPER, '-m', WHISPER_MODEL, '-f', wav16, '-l', 'en',
            '-ojf', '-of', out_prefix, '-pp', '-sns',
            '-mc', '0',                 # 앞 문장 문맥을 끊어 보기 기호(A. B. C.) 환각을 막는다
@@ -402,12 +476,16 @@ def _claude_env():
 
 
 def translate_chunk(chunk):
+    claude = claude_bin()
+    if not claude:
+        raise NotLoggedIn('claude CLI를 찾을 수 없습니다. Claude Code를 설치하고 터미널에서 '
+                          'claude를 실행해 /login 한 뒤 "번역 다시 하기"를 누르세요.')
     lines = '\n'.join('%d\t%s' % (s['i'], s['en']) for s in chunk)
     last_err = None
     for _ in range(2):
         with tempfile.TemporaryDirectory() as tmp:
             proc = subprocess.run(
-                [CLAUDE, '-p', TRANSLATE_PROMPT, '--output-format', 'json',
+                [claude, '-p', TRANSLATE_PROMPT, '--output-format', 'json',
                  '--model', CLAUDE_MODEL, '--no-session-persistence'],
                 input=lines, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
                 universal_newlines=True, cwd=tmp, env=_claude_env(), timeout=900)

@@ -18,8 +18,9 @@ import urllib.parse
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 import pipeline as P
+from model_download import ModelDownloader
 
-STATIC_DIR = os.path.join(P.ROOT, 'static')
+STATIC_DIR = os.path.join(P.BUNDLE_DIR, 'static')
 ID_RE = re.compile(r'^[A-Za-z0-9_-]+$')
 AUDIO_EXT = {'.mp3', '.m4a', '.wav', '.aac', '.ogg', '.flac', '.mp4'}
 MAX_UPLOAD = 1024 ** 3
@@ -35,6 +36,7 @@ CONTENT_TYPES = {
 
 jobs = queue.Queue()
 lesson_lock = threading.Lock()
+downloader = ModelDownloader()
 
 
 def worker():
@@ -137,6 +139,12 @@ class Handler(BaseHTTPRequestHandler):
             return self.serve_static(path[len('/static/'):])
         if path == '/api/lessons':
             return self.send_json([self.lesson_summary(lid) for lid in lesson_ids()])
+        if path == '/api/setup':
+            return self.send_json({
+                'model': downloader.state(),
+                'whisper': bool(P.WHISPER),
+                'claude': P.claude_bin(),
+            })
         m = re.match(r'^/api/lessons/([A-Za-z0-9_-]+)$', path)
         if m:
             return self.get_lesson(m.group(1))
@@ -148,6 +156,9 @@ class Handler(BaseHTTPRequestHandler):
     def route_post(self, path):
         if path == '/api/lessons':
             return self.upload()
+        if path == '/api/setup/download':
+            downloader.start()
+            return self.send_json(downloader.state(), 202)
         m = re.match(r'^/api/lessons/([A-Za-z0-9_-]+)/translate$', path)
         if m:
             return self.retranslate(m.group(1))
@@ -200,6 +211,8 @@ class Handler(BaseHTTPRequestHandler):
         self.send_bytes(body, 'audio/wav', cache='public, max-age=31536000, immutable')
 
     def upload(self):
+        if not downloader.ready():
+            return self.fail(409, '음성 인식 모델을 먼저 내려받아 주세요')
         name = urllib.parse.unquote(self.headers.get('X-Filename') or 'audio.mp3')
         ext = os.path.splitext(name)[1].lower()
         if ext not in AUDIO_EXT:
@@ -262,21 +275,29 @@ class Handler(BaseHTTPRequestHandler):
         self.send_json(s)
 
 
+def start_worker():
+    """처리 작업자를 띄우고, 꺼지기 전에 처리하던 레슨을 다시 줄 세운다."""
+    os.makedirs(P.DATA_DIR, exist_ok=True)
+    threading.Thread(target=worker, daemon=True).start()
+    resume_unfinished()
+
+
+def make_server(host, port):
+    httpd = ThreadingHTTPServer((host, port), Handler)
+    httpd.daemon_threads = True
+    return httpd
+
+
 def main():
     ap = argparse.ArgumentParser(description='LC Repeater 로컬 서버')
     ap.add_argument('--port', type=int, default=int(os.environ.get('PORT', 8765)))
     ap.add_argument('--lan', action='store_true', help='같은 네트워크의 다른 기기에서도 접속 허용')
     args = ap.parse_args()
 
-    os.makedirs(P.DATA_DIR, exist_ok=True)
-    if not os.path.isfile(P.WHISPER_MODEL):
-        print('⚠️  Whisper 모델이 없습니다: %s\n   ./setup.sh 를 먼저 실행하세요.' % P.WHISPER_MODEL)
-    threading.Thread(target=worker, daemon=True).start()
-    resume_unfinished()
-
-    host = '0.0.0.0' if args.lan else '127.0.0.1'
-    httpd = ThreadingHTTPServer((host, args.port), Handler)
-    httpd.daemon_threads = True
+    if not downloader.ready():
+        print('Whisper 모델이 없습니다. 화면에서 내려받거나 ./setup.sh 를 실행하세요.')
+    start_worker()
+    httpd = make_server('0.0.0.0' if args.lan else '127.0.0.1', args.port)
     print('LC Repeater: http://localhost:%d' % args.port)
     if args.lan:
         print('휴대폰(같은 와이파이): http://%s:%d' % (lan_ip(), args.port))

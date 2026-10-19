@@ -24,3 +24,8 @@ models/
 
 # 환경 변수
 .env
+
+# 맥 앱 빌드
+.venv/
+build/
+dist/

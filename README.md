@@ -4,25 +4,29 @@
 
 mp3를 올리면 문장 단위로 잘라 주고, 문장마다 한국어 번역을 붙인다. 카드를 누르면 영어 ↔ 한국어가 바뀐다.
 
-## 준비 (처음 한 번)
+## 맥 앱으로 쓰기
 
 ```bash
-./setup.sh
+./build_app.sh
 ```
 
-- Homebrew로 `whisper-cpp`를 설치하고 Whisper 모델(`ggml-large-v3-turbo-q5_0.bin`, 547MB)을 `models/`에 받는다.
-- 번역은 `claude -p`로 한다. 터미널에서 `claude`를 실행해 `/login` 해 두어야 한다. 로그인 전에도 문장 반복은 쓸 수 있고, 로그인 뒤 화면의 **번역 다시 하기**를 누르면 된다.
-- Python은 3.7 이상이면 되고 추가 패키지는 필요 없다.
+- `dist/LC Repeater.app`(약 31MB)이 만들어진다. 응용 프로그램 폴더로 옮겨 두고 더블클릭해서 쓴다.
+- 처음 열면 음성 인식 모델(547MB)을 내려받는 화면이 나온다. 중간에 끊겨도 받은 데까지 이어서 받는다.
+- 음원·처리 결과·모델·로그는 `~/Library/Application Support/LC Repeater/`에 저장된다.
+- 번역은 `claude -p`로 한다. Claude Code를 설치하고 터미널에서 `claude`를 실행해 `/login` 해 두어야 한다. 로그인 전에도 문장 반복은 쓸 수 있고, 로그인 뒤 화면의 **번역 다시 하기**를 누르면 된다.
+- Apple Silicon 맥, macOS 13 이상에서 돌아간다.
+- 빌드에는 Xcode 명령줄 도구와 Python 3.9 이상(Homebrew)이 필요하다. 빌드 도구(PyInstaller, pywebview, cmake)는 `.venv`에만 설치되고, whisper.cpp v1.9.5를 받아 다른 라이브러리에 기대지 않는 실행 파일로 빌드해 앱에 넣는다.
+- 서명하지 않은 앱이라 다른 맥에 파일로 옮기면 "확인되지 않은 개발자" 경고가 뜬다. 우클릭 → 열기로 열 수 있다.
 
-## 실행
+## 브라우저로 쓰기 (개발용)
 
 ```bash
-python3 server.py
+./setup.sh          # 처음 한 번: Homebrew whisper-cpp 설치, models/에 모델 받기
+python3 server.py   # http://localhost:8765
 ```
 
-http://localhost:8765 를 열고 mp3를 끌어다 놓는다. 문장 나누기가 끝나면 번역을 기다리지 않고 바로 들을 수 있다.
-
-같은 와이파이의 휴대폰에서 쓰려면 `python3 server.py --lan`으로 띄우고 출력된 주소로 접속한다.
+- 데이터는 프로젝트의 `data/`에 저장된다. 서버 코드는 Python 3.7 이상 표준 라이브러리만 쓴다.
+- 같은 와이파이의 휴대폰에서 쓰려면 `python3 server.py --lan`으로 띄우고 출력된 주소로 접속한다.
 
 명령줄로만 처리할 수도 있다.
 
@@ -47,19 +51,19 @@ python3 pipeline.py --resegment <id>    # 받아쓰기는 그대로 두고 문�
 
 ## 처리 방식
 
-1. ffmpeg로 재생용 `master.wav`(32kHz 모노)와 인식용 16kHz wav를 만든다.
+1. 맥 내장 `afconvert`로 재생용 `master.wav`(32kHz 모노)와 인식용 16kHz wav를 만든다(ffmpeg 불필요).
 2. whisper.cpp로 받아쓴다. 앞 문장 문맥을 끊어(`-mc 0`) 보기 기호(A. B. C.)가 대화 문장에 잘못 붙는 것을 막고, 토큰별 시각(DTW)을 함께 받는다.
-3. 문장부호와 쉼으로 문장을 나눈다. Whisper 시각은 0.1~0.6초씩 흔들려서, 문장 경계는 ffmpeg `silencedetect`로 찾은 무음 구간 안으로 옮기고 앞 0.12초, 뒤 0.2초의 여유를 둔다.
+3. 문장부호와 쉼으로 문장을 나눈다. Whisper 시각은 0.1~0.6초씩 흔들려서, 문장 경계는 무음 구간(10ms 단위로 파일 평균보다 16dB 이상 조용한 곳) 안으로 옮기고 앞 0.12초, 뒤 0.2초의 여유를 둔다.
    - Whisper가 가끔 한 구간을 문장부호 없이 받아쓴다. 그런 덩어리는 0.33초 이상 쉬는 곳마다 자른다(문장 끝 쉼은 대개 이보다 길고 쉼표 자리는 짧다). 문장부호가 있어도 10초가 넘으면 가장 긴 쉼에서 자른다.
    - "Yes.", "Sure." 같은 한 단어 문장은 0.8초 미만으로 쉬고 이어지면 다음 문장에 붙인다.
    - 문장부호와 대문자는 번역 단계에서 Claude가 바로잡는다.
 4. 문장 목록을 40개씩 묶어 `claude -p`로 번역한다. 같은 호출에서 명백한 인식 오류 교정과 시험 안내 문장 표시도 한다.
-5. 재생할 때 서버가 `master.wav`에서 해당 구간만 잘라 WAV로 보낸다. 브라우저는 그 짧은 파일을 처음부터 끝까지 재생하므로 구간이 정확하다.
+5. 재생할 때 서버가 `master.wav`에서 해당 구간만 잘라 WAV로 보낸다. 플레이어는 그 짧은 파일을 처음부터 끝까지 재생하므로 구간이 정확하다.
 
-환경 변수로 바꿀 수 있는 것: `WHISPER_MODEL`(모델 경로), `CLAUDE_MODEL`(기본 `sonnet`), `PORT`.
+환경 변수로 바꿀 수 있는 것: `WHISPER_MODEL`(모델 경로), `LCR_DATA_DIR`(데이터 폴더), `LCR_SUPPORT_DIR`(앱의 데이터·모델 폴더), `LCR_MODEL_URL`(모델 내려받을 주소), `CLAUDE_MODEL`(기본 `sonnet`), `PORT`.
 
 ## 데이터
 
-`data/<레슨 id>/`에 원본 음원, `master.wav`, `whisper.json`, `lesson.json`(문장·시각·번역)이 저장된다.
+레슨마다 `data/<레슨 id>/`에 원본 음원, `master.wav`, `whisper.json`, `lesson.json`(문장·시각·번역)이 저장된다.
 
-교재 음원과 스크립트는 저작권물이라 저장소에 올리지 않는다. `data/`, 음원 파일, 모델은 `.gitignore`로 제외한다.
+교재 음원과 스크립트는 저작권물이라 저장소에 올리지 않는다. `data/`, 음원 파일, 모델, 빌드 결과물은 `.gitignore`로 제외한다.
