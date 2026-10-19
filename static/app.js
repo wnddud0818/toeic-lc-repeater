@@ -600,7 +600,7 @@ class Player {
   renderList() {
     this.el.list.innerHTML = this.order.map((k, p) => {
       const s = this.S[k];
-      return `<li data-p="${p}"${s.kind === 'direction' ? ' class="direction"' : ''}><span class="num">${s.i}</span><span>${esc(s.en)}</span></li>`;
+      return `<li data-p="${p}"${s.kind === 'direction' ? ' class="direction"' : ''}><span class="num">${p + 1}</span><span>${esc(s.en)}</span></li>`;
     }).join('');
     this.el.listCount.textContent = `${this.order.length}개`;
     this.highlightList();

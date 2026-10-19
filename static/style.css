@@ -255,7 +255,7 @@ main { max-width: 1180px; margin: 0 auto; padding: 20px 16px 48px; }
 }
 .list-head span { color: var(--text-3); font-weight: 500; }
 .sent-list { position: relative; list-style: none; margin: 0; padding: 6px; overflow-y: auto; max-height: 60vh; }
-@media (min-width: 900px) { .sent-list { max-height: none; flex: 1; } }
+@media (min-width: 900px) { .sent-list { max-height: none; flex: 1; min-height: 0; } }
 .sent-list li {
   display: grid; grid-template-columns: 30px 1fr; gap: 8px;
   padding: 8px 10px; border-radius: 9px;

@@ -31,6 +31,8 @@ MASTER_RATE = 32000
 PAD_START = 0.12   # 문장 시작 앞 여유(초)
 PAD_END = 0.20     # 문장 끝 뒤 여유(초)
 DTW_LAG = 0.15     # DTW 토큰 시간이 실제 발음보다 늦는 정도(초)
+MAX_SENTENCE_SEC = 10.0          # 이보다 긴 문장은 가장 긴 쉼에서 나눈다
+UNPUNCTUATED_SPLIT_PAUSE = 0.33  # 문장부호 없이 받아쓴 구간은 이 이상 쉬는 곳에서 나눈다
 
 TRANSLATE_CHUNK = 40
 TRANSLATE_WORKERS = 3
@@ -210,12 +212,17 @@ def extract_words(wjson):
 
 # ---------- 3. 문장 나누기 ----------
 
-def silence_between(silences, t_from, t_to, min_len):
-    """t_from 이후에 시작해서 t_to(+여유) 전에 끝나는 min_len 이상의 무음이 있나"""
+def longest_pause(silences, t_from, t_to):
+    """t_from 이후에 시작해서 t_to(+여유) 전에 끝나는 가장 긴 무음의 길이(초)"""
+    best = 0.0
     for s, e in silences:
-        if s >= t_from and e <= t_to + 0.3 and e - s >= min_len:
-            return True
-    return False
+        if s >= t_from and e <= t_to + 0.3:
+            best = max(best, e - s)
+    return best
+
+
+def silence_between(silences, t_from, t_to, min_len):
+    return longest_pause(silences, t_from, t_to) >= min_len
 
 
 def ends_sentence(cur, word, nxt):
@@ -234,11 +241,48 @@ def content_words(ws):
     return [w for w in ws if not (w is ws[0] and CHOICE_LABEL.match(w['text']))]
 
 
+def is_unpunctuated(group):
+    """Whisper가 가끔 문장부호·대문자 없이 받아쓰는 구간인가"""
+    return len(group) >= 8 and not any(re.search(r'[.,?!;:]', w['text']) for w in group[:-1])
+
+
+def split_long(group, silences):
+    """문장부호로 못 나눈 덩어리를 쉼 길이로 나눈다.
+
+    - 문장부호가 없으면: 0.33초 이상 쉬는 곳마다 자른다(문장 끝 쉼은 대개 이보다 길고 쉼표 자리는 짧다).
+    - 문장부호가 있어도 MAX_SENTENCE_SEC를 넘으면: 가장 긴 쉼에서 자른다.
+    양쪽 모두 3단어 이상이 되게 자른다.
+    """
+    if len(group) < 6:
+        return [group]
+    duration = group[-1]['t'] - group[0]['t'] + 0.5
+    best = None
+    for j in range(2, len(group) - 3):          # j번째 단어 뒤에서 자른다
+        pause = longest_pause(silences, group[j]['t'], group[j + 1]['t'])
+        if group[j]['text'].endswith(','):
+            pause += 0.05
+        balance = abs((j + 1) - (len(group) - j - 1)) / float(len(group))
+        key = (round(pause, 2), -balance)
+        if best is None or key > best[0]:
+            best = (key, j, pause)
+    if best is None:
+        return [group]
+    _, j, pause = best
+    if (is_unpunctuated(group) and pause >= UNPUNCTUATED_SPLIT_PAUSE) or \
+            (duration > MAX_SENTENCE_SEC and pause >= 0.12):
+        return split_long(group[:j + 1], silences) + split_long(group[j + 1:], silences)
+    return [group]
+
+
 def split_sentences(words, silences):
-    # 추정 시각이 무음 안에 떨어진 단어는 무음이 끝나는 지점(실제 발화 시작)으로 옮긴다
     for w in words:
         for s, e in silences:
+            # 추정 시각이 무음 안에 떨어진 단어는 무음이 끝나는 지점(실제 발화 시작)으로 옮긴다
             if s <= w['t'] < e - 0.01:
+                w['t'] = e
+                break
+            # Whisper 구간 시작은 앞 발화 끝자락으로 잡힐 때가 있다. 바로 뒤에 쉼이 있으면 그 뒤가 시작이다
+            if w['first_in_seg'] and w['t'] <= s <= w['t'] + 0.4 and e - s >= 0.3:
                 w['t'] = e
                 break
     groups, cur = [], []
@@ -257,14 +301,25 @@ def split_sentences(words, silences):
             cur = []
     if cur:
         groups.append(cur)
+    groups = [part for g in groups for part in split_long(g, silences)]
 
-    # "C. Yes." 처럼 쉼 없이 이어지는 아주 짧은 문장은 다음 문장과 합친다
+    # 아주 짧은 문장은 다음 문장과 합친다
+    #  - 2단어 이하("C. Yes.", "Of course."): 쉼 없이 이어질 때
+    #  - 1단어("Yes.", "Sure."): 0.8초 미만으로 쉬고 이어질 때. 다음이 보기·문항 번호면 합치지 않는다
     merged, i = [], 0
     while i < len(groups):
         g = groups[i]
-        if (i + 1 < len(groups) and len(content_words(g)) <= 2
-                and not silence_between(silences, g[-1]['t'], groups[i + 1][0]['t'], 0.35)):
-            groups[i + 1] = g + groups[i + 1]
+        nxt = groups[i + 1] if i + 1 < len(groups) else None
+        merge = False
+        if nxt:
+            n_words = len(content_words(g))
+            pause = longest_pause(silences, g[-1]['t'], nxt[0]['t'])
+            starts_new_item = bool(CHOICE_LABEL.match(nxt[0]['text'])) or \
+                nxt[0]['text'].lower().startswith(('number', 'question'))
+            merge = (n_words <= 2 and pause < 0.35) or \
+                (n_words <= 1 and pause < 0.8 and not starts_new_item)
+        if merge:
+            groups[i + 1] = g + nxt
         else:
             merged.append(g)
         i += 1
@@ -438,16 +493,43 @@ def process(lesson_id, title=None, do_translate=True, log=print):
         os.remove(wav16)
         log('음성 인식 %.1f초' % (time.time() - t0))
 
-        set_status(d, 'segment')
-        silences = detect_silences(master)
-        words = extract_words(wjson)
-        sentences = place_boundaries(split_sentences(words, silences), silences, duration)
-        lesson = {'id': lesson_id, 'title': title, 'duration': round(duration, 3),
-                  'created': meta.get('created', time.time()), 'sentences': sentences}
-        write_json(os.path.join(d, 'lesson.json'), lesson)
-        log('문장 %d개' % len(sentences))
-
+        sentences = segment_lesson(lesson_id, wjson, title, meta, log)
     except Exception as e:  # 상태 파일에 남겨 화면에서 보이게 한다
+        set_status(d, 'error', error=str(e)[-800:])
+        raise
+    if do_translate and sentences:
+        translate_lesson(lesson_id, log)
+    else:
+        set_status(d, 'done')
+    return read_json(os.path.join(d, 'lesson.json'))
+
+
+def segment_lesson(lesson_id, wjson, title, meta, log=print):
+    d = lesson_dir(lesson_id)
+    set_status(d, 'segment')
+    master = os.path.join(d, 'master.wav')
+    duration = wav_duration(master)
+    silences = detect_silences(master)
+    words = extract_words(wjson)
+    sentences = place_boundaries(split_sentences(words, silences), silences, duration)
+    lesson = {'id': lesson_id, 'title': title, 'duration': round(duration, 3),
+              'created': meta.get('created', time.time()), 'sentences': sentences}
+    write_json(os.path.join(d, 'lesson.json'), lesson)
+    log('문장 %d개' % len(sentences))
+    return sentences
+
+
+def resegment(lesson_id, do_translate=True, log=print):
+    """받아쓰기(whisper.json)는 그대로 두고 문장 나누기와 번역만 다시 한다."""
+    d = lesson_dir(lesson_id)
+    meta = read_json(os.path.join(d, 'meta.json'), {}) or {}
+    old = read_json(os.path.join(d, 'lesson.json'), {}) or {}
+    title = old.get('title') or meta.get('title') or lesson_id
+    try:
+        with open(os.path.join(d, 'whisper.json'), encoding='utf-8') as f:
+            wjson = json.load(f)
+        sentences = segment_lesson(lesson_id, wjson, title, meta, log)
+    except Exception as e:
         set_status(d, 'error', error=str(e)[-800:])
         raise
     if do_translate and sentences:
@@ -527,8 +609,12 @@ def main():
     ap.add_argument('--title')
     ap.add_argument('--no-translate', action='store_true')
     ap.add_argument('--retranslate', metavar='LESSON_ID', help='이미 처리한 레슨의 번역만 다시')
+    ap.add_argument('--resegment', metavar='LESSON_ID', help='받아쓰기는 그대로 두고 문장 나누기와 번역을 다시')
     args = ap.parse_args()
-    if args.retranslate:
+    if args.resegment:
+        lesson_id = args.resegment
+        lesson = resegment(lesson_id, do_translate=not args.no_translate)
+    elif args.retranslate:
         lesson_id = args.retranslate
         translate_lesson(lesson_id)
         lesson = read_json(os.path.join(lesson_dir(lesson_id), 'lesson.json'))
