@@ -1,0 +1,78 @@
+name: Build and release LC Repeater for macOS
+
+on:
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: 'Release tag'
+        required: true
+        default: 'v0.1.0'
+  push:
+    branches:
+      - main
+    paths:
+      - '.github/workflows/release-macos.yml'
+
+permissions:
+  contents: write
+
+concurrency:
+  group: macos-release
+  cancel-in-progress: false
+
+jobs:
+  release:
+    name: macOS Apple Silicon release
+    runs-on: macos-15
+    timeout-minutes: 90
+    env:
+      RELEASE_TAG: ${{ github.event.inputs.tag || 'v0.1.0' }}
+
+    steps:
+      - name: Check out sources
+        uses: actions/checkout@v4
+
+      - name: Set up arm64 Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: '3.12'
+          architecture: arm64
+
+      - name: Confirm build platform
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(uname -m)" = "arm64"
+          python3 --version
+          xcode-select -p
+
+      - name: Build app
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p build
+          bash ./build_app.sh
+
+      - name: Package app for download
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -f "dist/LC Repeater.app/Contents/Info.plist"
+          ditto -c -k --sequesterRsrc --keepParent \
+            "dist/LC Repeater.app" "dist/LC-Repeater-macos-arm64.zip"
+          shasum -a 256 "dist/LC-Repeater-macos-arm64.zip"
+
+      - name: Create release or upload updated asset
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          if gh release view "$RELEASE_TAG" >/dev/null 2>&1; then
+            gh release upload "$RELEASE_TAG" "dist/LC-Repeater-macos-arm64.zip" --clobber
+          else
+            gh release create "$RELEASE_TAG" "dist/LC-Repeater-macos-arm64.zip" \
+              --target "$GITHUB_SHA" \
+              --title "LC Repeater $RELEASE_TAG" \
+              --notes "Apple Silicon (arm64), macOS 13+. Unsigned app. The Whisper model is downloaded on first launch. Install Claude Code and log in to enable translations."
+          fi
