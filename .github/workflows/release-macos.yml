@@ -6,18 +6,33 @@ on:
       tag:
         description: 'Release tag'
         required: true
-        default: 'v0.1.0'
+        default: 'v0.2.1'
   push:
     branches:
       - main
     paths:
       - '.github/workflows/release-macos.yml'
+      - 'static/**'
+      - '*.py'
+      - 'build_app.sh'
+      - 'requirements-build.txt'
+      - 'scripts/make_icon.py'
+  pull_request:
+    branches:
+      - main
+    paths:
+      - '.github/workflows/release-macos.yml'
+      - 'static/**'
+      - '*.py'
+      - 'build_app.sh'
+      - 'requirements-build.txt'
+      - 'scripts/make_icon.py'
 
 permissions:
   contents: write
 
 concurrency:
-  group: macos-release
+  group: macos-${{ github.event_name }}-${{ github.event.pull_request.number || github.ref }}
   cancel-in-progress: false
 
 jobs:
@@ -26,7 +41,7 @@ jobs:
     runs-on: macos-15
     timeout-minutes: 90
     env:
-      RELEASE_TAG: ${{ github.event.inputs.tag || 'v0.1.0' }}
+      RELEASE_TAG: ${{ github.event.inputs.tag || 'v0.2.1' }}
 
     steps:
       - name: Check out sources
@@ -53,6 +68,20 @@ jobs:
           mkdir -p build
           bash ./build_app.sh
 
+      - name: Verify packaged player resources
+        run: |
+          node --check static/app.js
+          python3 -m unittest discover -s tests -v
+          python3 - <<'PY'
+          from pathlib import Path
+          resources = Path('dist/LC Repeater.app/Contents/Resources')
+          for name in ('app.js', 'style.css', 'index.html'):
+              source = Path('static') / name
+              bundled = resources / 'static' / name
+              assert bundled.read_bytes() == source.read_bytes(), f'Bundled player differs: {name}'
+          print('Packaged player resources match checked-out sources')
+          PY
+
       - name: Package app for download
         shell: bash
         run: |
@@ -60,18 +89,31 @@ jobs:
           test -f "dist/LC Repeater.app/Contents/Info.plist"
           ditto -c -k --sequesterRsrc --keepParent \
             "dist/LC Repeater.app" "dist/LC-Repeater-macos-arm64.zip"
-          shasum -a 256 "dist/LC-Repeater-macos-arm64.zip"
+          (cd dist && shasum -a 256 LC-Repeater-macos-arm64.zip > LC-Repeater-macos-arm64.zip.sha256)
+          cat dist/LC-Repeater-macos-arm64.zip.sha256
+
+      - name: Upload app and checksum
+        uses: actions/upload-artifact@v4
+        with:
+          name: LC-Repeater-macos-arm64
+          path: |
+            dist/LC-Repeater-macos-arm64.zip
+            dist/LC-Repeater-macos-arm64.zip.sha256
+          if-no-files-found: error
 
       - name: Create release or upload updated asset
+        if: github.event_name == 'workflow_dispatch'
         shell: bash
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
           if gh release view "$RELEASE_TAG" >/dev/null 2>&1; then
-            gh release upload "$RELEASE_TAG" "dist/LC-Repeater-macos-arm64.zip" --clobber
+            gh release upload "$RELEASE_TAG" "dist/LC-Repeater-macos-arm64.zip" \
+              "dist/LC-Repeater-macos-arm64.zip.sha256" --clobber
           else
             gh release create "$RELEASE_TAG" "dist/LC-Repeater-macos-arm64.zip" \
+              "dist/LC-Repeater-macos-arm64.zip.sha256" \
               --target "$GITHUB_SHA" \
               --title "LC Repeater $RELEASE_TAG" \
               --notes "Apple Silicon (arm64), macOS 13+. Unsigned app. The Whisper model is downloaded on first launch. Install Claude Code and log in to enable translations."
