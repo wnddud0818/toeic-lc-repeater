@@ -48,6 +48,7 @@ final class RepeaterPlayer: ObservableObject {
     private var audioFile: AVAudioFile?
     private var cursor: PlaybackCursor?
     private var slots: [Slot] = []
+    private var completedSlots = Set<UUID>()
     private var buffers: [String: (AVAudioPCMBuffer, AVAudioFrameCount)] = [:]
     private var nextFrame: AVAudioFramePosition = 0
     private var generation = UUID()
@@ -162,6 +163,7 @@ final class RepeaterPlayer: ObservableObject {
         node.stop()
         engine.pause()
         slots.removeAll()
+        completedSlots.removeAll()
         buffers.removeAll()
         cursor = nil
         nextFrame = 0
@@ -237,14 +239,21 @@ final class RepeaterPlayer: ObservableObject {
     }
 
     private func completed(_ id: UUID, generation expected: UUID) {
-        guard generation == expected, let first = slots.first, first.id == id else { return }
-        slots.removeFirst()
+        guard generation == expected, slots.contains(where: { $0.id == id }) else { return }
+        completedSlots.insert(id)
+        var lastCompleted: Slot?
+        // Actor tasks can reach the main actor in a different order from the audio
+        // callbacks. Retain out-of-order completions until their predecessors arrive.
+        while let first = slots.first, completedSlots.remove(first.id) != nil {
+            lastCompleted = slots.removeFirst()
+        }
+        guard let lastCompleted else { return }
         do { try fillQueue() } catch { fail(error); return }
         let keys = Set(slots.map(\.key))
         buffers = buffers.filter { keys.contains($0.key) }
         if slots.isEmpty {
-            sentenceID = first.step.sentence.i
-            repetition = first.step.repetition
+            sentenceID = lastCompleted.step.sentence.i
+            repetition = lastCompleted.step.repetition
             isPlaying = false
             phase = "다 들었어요"
             progress = 1
