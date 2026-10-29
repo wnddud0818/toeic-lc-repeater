@@ -25,7 +25,7 @@ $Stream = [System.IO.File]::Create((Join-Path $PSScriptRoot 'build/AppIcon.ico')
 try { $Icon.Save($Stream) } finally { $Stream.Dispose(); $Icon.Dispose(); $Bitmap.Dispose(); $Image.Dispose() }
 
 & $Python -m PyInstaller --noconfirm --clean --windowed --onedir --log-level WARN `
-    --name 'LC Repeater' --icon build/AppIcon.ico `
+    --name 'LC Repeater' --icon "${PSScriptRoot}/build/AppIcon.ico" `
     --add-data "${PSScriptRoot}/static:static" `
     --add-data "${Tools}/licenses:licenses" `
     --add-binary "${Tools}/ffmpeg.exe:bin" `
