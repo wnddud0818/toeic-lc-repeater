@@ -31,7 +31,16 @@ jobs:
           python -m unittest discover -s tests -v
           if ($LASTEXITCODE -ne 0) { throw 'Python tests failed' }
           node --check static/app.js
+      - name: Restore Whisper build
+        id: whisper-cache
+        uses: actions/cache/restore@v4
+        with:
+          path: |
+            build/windows-tools/whisper-cli.exe
+            build/windows-tools/licenses/Whisper-MIT.txt
+          key: whisper195-windows2022-static-cpu-utf8-v1-${{ hashFiles('installer/whisper-utf8.manifest') }}
       - name: Check out Whisper CPU source
+        if: steps.whisper-cache.outputs.cache-hit != 'true'
         uses: actions/checkout@v4
         with:
           repository: ggml-org/whisper.cpp
@@ -39,6 +48,7 @@ jobs:
           path: build/whisper.cpp
           persist-credentials: false
       - name: Build standalone Whisper CPU executable
+        if: steps.whisper-cache.outputs.cache-hit != 'true'
         run: |
           cmake -S build/whisper.cpp -B build/whisper-windows -A x64 `
             -DBUILD_SHARED_LIBS=OFF -DCMAKE_MSVC_RUNTIME_LIBRARY=MultiThreaded `
@@ -51,7 +61,28 @@ jobs:
           New-Item -ItemType Directory -Force build/windows-tools/licenses | Out-Null
           Copy-Item build/whisper-windows/bin/Release/whisper-cli.exe build/windows-tools/
           Copy-Item build/whisper.cpp/LICENSE build/windows-tools/licenses/Whisper-MIT.txt
+          $ManifestTool = Get-ChildItem "${env:ProgramFiles(x86)}/Windows Kits/10/bin/*/x64/mt.exe" | Sort-Object FullName -Descending | Select-Object -First 1
+          & $ManifestTool.FullName -manifest installer/whisper-utf8.manifest '-outputresource:build/windows-tools/whisper-cli.exe;#1'
+          if ($LASTEXITCODE -ne 0) { throw 'Whisper UTF-8 manifest embedding failed' }
+      - name: Cache Whisper build
+        if: steps.whisper-cache.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v4
+        with:
+          path: |
+            build/windows-tools/whisper-cli.exe
+            build/windows-tools/licenses/Whisper-MIT.txt
+          key: whisper195-windows2022-static-cpu-utf8-v1-${{ hashFiles('installer/whisper-utf8.manifest') }}
+      - name: Restore FFmpeg build
+        id: ffmpeg-cache
+        uses: actions/cache/restore@v4
+        with:
+          path: |
+            build/windows-tools/ffmpeg.exe
+            build/windows-tools/licenses/FFmpeg*
+            build/windows-tools/licenses/ffmpeg-9.0.2-source.tar.xz
+          key: ffmpeg902-windows2022-audio-${{ hashFiles('scripts/build_ffmpeg_windows.sh') }}
       - name: Check out FFmpeg source
+        if: steps.ffmpeg-cache.outputs.cache-hit != 'true'
         uses: actions/checkout@v4
         with:
           repository: FFmpeg/FFmpeg
@@ -59,14 +90,25 @@ jobs:
           path: build/ffmpeg-src
           persist-credentials: false
       - name: Set up MinGW compiler
+        if: steps.ffmpeg-cache.outputs.cache-hit != 'true'
         uses: msys2/setup-msys2@v2
         with:
           msystem: MINGW64
           update: false
           install: mingw-w64-x86_64-gcc make diffutils pkgconf
       - name: Build standalone audio converter and include corresponding source
+        if: steps.ffmpeg-cache.outputs.cache-hit != 'true'
         shell: msys2 {0}
         run: bash scripts/build_ffmpeg_windows.sh
+      - name: Cache FFmpeg build
+        if: steps.ffmpeg-cache.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v4
+        with:
+          path: |
+            build/windows-tools/ffmpeg.exe
+            build/windows-tools/licenses/FFmpeg*
+            build/windows-tools/licenses/ffmpeg-9.0.2-source.tar.xz
+          key: ffmpeg902-windows2022-audio-${{ hashFiles('scripts/build_ffmpeg_windows.sh') }}
       - name: Build Windows application
         run: ./build_windows.ps1
       - name: Download Microsoft WebView2 bootstrapper

@@ -21,6 +21,6 @@ make install
 cp "$LCR_REPO_DIR/build/ffmpeg-install/bin/ffmpeg.exe" "$LCR_REPO_DIR/build/windows-tools/ffmpeg.exe"
 cp "$LCR_FFMPEG_SOURCE/COPYING.LGPLv2.1" "$LCR_REPO_DIR/build/windows-tools/licenses/FFmpeg-LGPL-2.1.txt"
 cp "$LCR_REPO_DIR/scripts/build_ffmpeg_windows.sh" "$LCR_REPO_DIR/build/windows-tools/licenses/FFmpeg-build.sh"
-git -C "$LCR_FFMPEG_SOURCE" archive --prefix=ffmpeg-9.0.2/ HEAD | xz -T2 > \
-  "$LCR_REPO_DIR/build/windows-tools/licenses/ffmpeg-9.0.2-source.tar.xz"
+tar -C "$LCR_FFMPEG_SOURCE" --exclude=.git -cJf \
+  "$LCR_REPO_DIR/build/windows-tools/licenses/ffmpeg-9.0.2-source.tar.xz" .
 "$LCR_REPO_DIR/build/windows-tools/ffmpeg.exe" -version

@@ -1,6 +1,6 @@
 # Windows 앱
 
-Windows 10 1809 이상 / Windows 11의 Intel·AMD 64비트(x64) PC용이다.
+Windows 10 1903 이상 / Windows 11의 Intel·AMD 64비트(x64) PC용이다.
 
 ## 설치와 사용
 

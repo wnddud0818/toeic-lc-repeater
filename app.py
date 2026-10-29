@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """LC Repeater desktop entry point, packaged by PyInstaller on macOS and Windows.
 
-데이터와 모델은 ~/Library/Application Support/LC Repeater/ 에 둔다(앱 안에는 쓸 수 없다).
+데이터와 모델은 운영체제의 사용자 데이터 폴더에 둔다(앱 안에는 쓸 수 없다).
 개발 중에는 `.venv/bin/python app.py`로 바로 띄워 볼 수 있다.
 """
 import os
