@@ -144,6 +144,9 @@ main { max-width: 1180px; margin: 0 auto; padding: 20px 16px 48px; }
 /* ---------- 플레이어 ---------- */
 
 .player { display: grid; gap: 20px; }
+.export-panel { display: flex; flex-wrap: wrap; align-items: center; gap: 12px; }
+.export-panel a { text-decoration: none; }
+.export-panel span { color: var(--text-3); font-size: 13px; }
 @media (min-width: 900px) {
   .player { grid-template-columns: minmax(0, 1fr) 360px; align-items: start; }
   .list-wrap { position: sticky; top: 76px; max-height: calc(100vh - 96px); }

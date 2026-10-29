@@ -375,6 +375,10 @@ class Player {
           <span class="trim-range" id="range"></span>
         </div>
         <div class="keys"><kbd>Space</kbd> 재생/정지 · <kbd>←</kbd> <kbd>→</kbd> 이전/다음 · <kbd>T</kbd> 번역 · <kbd>R</kbd> 처음부터</div>
+        <div class="panel export-panel" id="exportPanel">
+          <a class="btn" id="exportLink" download>아이폰용 레슨 내보내기</a>
+          <span>AirDrop이나 iCloud Drive로 옮긴 뒤 아이폰 앱에서 가져오세요.</span>
+        </div>
       </div>
       <aside class="list-wrap">
         <div class="list-head">문장 목록 <span id="listCount"></span></div>
@@ -384,7 +388,7 @@ class Player {
 
     this.el = {};
     ['banner', 'card', 'pos', 'lang', 'sentence', 'hint', 'count', 'phase', 'bar', 'restart', 'prev',
-      'play', 'next', 'langBtn', 'range', 'list', 'listCount', 'reps', 'gap', 'speed', 'after', 'hideDir']
+      'play', 'next', 'langBtn', 'range', 'list', 'listCount', 'reps', 'gap', 'speed', 'after', 'hideDir', 'exportPanel', 'exportLink']
       .forEach(k => { this.el[k] = document.getElementById(k); });
     const el = this.el;
 
@@ -623,6 +627,8 @@ class Player {
   renderBanner() {
     const st = this.status;
     const el = this.el.banner;
+    this.el.exportPanel.style.display = st.stage === 'done' ? '' : 'none';
+    this.el.exportLink.href = `/api/lessons/${this.id}/export`;
     if (st.stage === 'translate') {
       el.innerHTML = `<div class="banner busy"><span class="msg">번역하는 중… ${Math.round((st.progress || 0) * 100)}% · 그동안 영어로 먼저 들을 수 있어요</span></div>`;
     } else if (st.stage === 'done' && st.error) {

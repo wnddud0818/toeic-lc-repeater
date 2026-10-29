@@ -18,6 +18,7 @@ import urllib.parse
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 import pipeline as P
+from export_lesson import prepare_export, ExportError
 from model_download import ModelDownloader
 
 STATIC_DIR = os.path.join(P.BUNDLE_DIR, 'static')
@@ -151,6 +152,9 @@ class Handler(BaseHTTPRequestHandler):
         m = re.match(r'^/api/lessons/([A-Za-z0-9_-]+)/clip/(\d+)-(\d+)\.wav$', path)
         if m:
             return self.get_clip(m.group(1), int(m.group(2)), int(m.group(3)))
+        m = re.match(r'^/api/lessons/([A-Za-z0-9_-]+)/export$', path)
+        if m:
+            return self.export_lesson(m.group(1))
         self.fail(404, '없는 경로')
 
     def route_post(self, path):
@@ -209,6 +213,28 @@ class Handler(BaseHTTPRequestHandler):
         body = P.read_clip(lid, a_ms / 1000.0, b_ms / 1000.0)
         # URL에 구간이 들어 있어 내용이 바뀌지 않으므로 오래 캐시해도 된다
         self.send_bytes(body, 'audio/wav', cache='public, max-age=31536000, immutable')
+
+    def export_lesson(self, lid):
+        folder = P.lesson_dir(lid)
+        if not os.path.isdir(folder):
+            return self.fail(404, '없는 레슨')
+        if read_status(lid).get('stage') != 'done':
+            return self.fail(409, '레슨 처리가 끝난 뒤 내보내 주세요')
+        try:
+            with prepare_export(folder) as (prefix, audio):
+                self.send_response(200)
+                self.send_header('Content-Type', 'application/octet-stream')
+                self.send_header('Content-Disposition', 'attachment; filename="%s.lcrlesson"' % lid)
+                self.send_header('Content-Length', str(len(prefix) + os.fstat(audio.fileno()).st_size))
+                self.send_header('Cache-Control', 'no-store')
+                self.end_headers()
+                if self.command != 'HEAD':
+                    self.wfile.write(prefix)
+                    shutil.copyfileobj(audio, self.wfile, 1024 * 1024)
+        except ExportError as exc:
+            self.fail(400, str(exc))
+        except (BrokenPipeError, ConnectionResetError):
+            pass  # The user cancelled the download.
 
     def upload(self):
         if not downloader.ready():
