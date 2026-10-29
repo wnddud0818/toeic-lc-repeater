@@ -1,0 +1,74 @@
+name: Build iOS app and verify lesson transfer
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main, 'codex/ios-*']
+    paths: ['ios/**', 'scripts/*ios*', 'export_lesson.py', 'server.py', 'tests/**', '.github/workflows/ios.yml']
+  pull_request:
+    branches: [main]
+    paths: ['ios/**', 'scripts/*ios*', 'export_lesson.py', 'server.py', 'tests/**', '.github/workflows/ios.yml']
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ios-${{ github.event.pull_request.head.ref || github.ref_name }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    runs-on: macos-15
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - name: Check project and Python export
+        run: |
+          python3 scripts/generate_ios_project.py --check
+          python3 -m unittest discover -s tests -v
+          python3 tests/make_fixture.py "$RUNNER_TEMP/contract.lcrlesson"
+          plutil -lint ios/LCRepeater/Info.plist ios/LCRepeater.xcodeproj/project.pbxproj
+      - name: Test Swift import and playback planning against Python output
+        env:
+          LCR_TEST_FIXTURE: ${{ runner.temp }}/contract.lcrlesson
+        run: swift test --package-path ios
+      - name: Build unsigned iPhone IPA
+        id: ipa
+        run: bash scripts/build_ios.sh
+      - name: Build and capture iPhone simulator
+        shell: bash
+        run: |
+          set -euo pipefail
+          xcodebuild -project ios/LCRepeater.xcodeproj -scheme LCRepeater \
+            -configuration Debug -destination 'generic/platform=iOS Simulator' \
+            -derivedDataPath build/ios-simulator CODE_SIGNING_ALLOWED=NO build
+          LCR_SIMULATOR=$(xcrun simctl list devices available -j | python3 -c 'import json,sys; d=json.load(sys.stdin); print(next(x["udid"] for group in d["devices"].values() for x in group if "iPhone" in x["name"]))')
+          xcrun simctl boot "$LCR_SIMULATOR"
+          xcrun simctl bootstatus "$LCR_SIMULATOR" -b
+          xcrun simctl install "$LCR_SIMULATOR" build/ios-simulator/Build/Products/Debug-iphonesimulator/LCRepeater.app
+          LCR_APP_DATA=$(xcrun simctl get_app_container "$LCR_SIMULATOR" com.firstghrn.lcrepeater.ios data)
+          mkdir -p "$LCR_APP_DATA/Documents"
+          cp "$RUNNER_TEMP/contract.lcrlesson" "$LCR_APP_DATA/Documents/contract.lcrlesson"
+          xcrun simctl launch "$LCR_SIMULATOR" com.firstghrn.lcrepeater.ios --smoke-test
+          for LCR_TRY in {1..30}; do
+            if [ -f "$LCR_APP_DATA/Documents/smoke-result.json" ]; then break; fi
+            sleep 1
+          done
+          python3 - "$LCR_APP_DATA/Documents/smoke-result.json" <<'PY'
+          import json, sys
+          with open(sys.argv[1]) as source:
+              result = json.load(source)
+          assert result == {'imported': 1, 'sentences': 2, 'current_sentence': 2, 'error': ''}, result
+          print('Simulator import and audio-file load passed')
+          PY
+          xcrun simctl io "$LCR_SIMULATOR" screenshot dist/ios-player-preview.png
+      - name: Upload IPA, checksum, and simulator preview
+        if: ${{ !cancelled() && steps.ipa.outcome == 'success' }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: LC-Repeater-iOS-unsigned
+          path: |
+            dist/LC-Repeater-unsigned.ipa
+            dist/LC-Repeater-unsigned.ipa.sha256
+            dist/ios-player-preview.png
+          if-no-files-found: error

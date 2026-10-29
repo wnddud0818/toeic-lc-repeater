@@ -29,3 +29,12 @@ models/
 .venv/
 build/
 dist/
+
+# iOS / Swift Package Manager / personal signing material
+.build/
+DerivedData/
+xcuserdata/
+*.ipa
+*.lcrlesson
+*.p12
+*.mobileprovision

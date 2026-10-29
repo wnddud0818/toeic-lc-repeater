@@ -1,0 +1,41 @@
+// !$*UTF8*$!
+{
+	archiveVersion = 1;
+	classes = {};
+	objectVersion = 56;
+	objects = {
+		A3E6DD06FCBFA8D54C9463EF = { isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "Core/Lesson.swift"; sourceTree = "<group>"; };
+		D8B6D1E2901BCFD0C1519960 = { isa = PBXBuildFile; fileRef = A3E6DD06FCBFA8D54C9463EF; };
+		816CA21352D3C35FBE49D535 = { isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "Core/LessonArchive.swift"; sourceTree = "<group>"; };
+		03C7A8A389A93A0B022CA62C = { isa = PBXBuildFile; fileRef = 816CA21352D3C35FBE49D535; };
+		B0D35430A9A37E8F7E6A6059 = { isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "LCRepeaterApp.swift"; sourceTree = "<group>"; };
+		712D12D2BB17294D9A5ABC14 = { isa = PBXBuildFile; fileRef = B0D35430A9A37E8F7E6A6059; };
+		3AD605BF5DBC68B141495805 = { isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "LessonLibrary.swift"; sourceTree = "<group>"; };
+		C7FFF0A066D6CF65663ECBAF = { isa = PBXBuildFile; fileRef = 3AD605BF5DBC68B141495805; };
+		7761F420BEEFBB737F2126CB = { isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "LibraryView.swift"; sourceTree = "<group>"; };
+		0CFBEBF3E82F8CAFDD299718 = { isa = PBXBuildFile; fileRef = 7761F420BEEFBB737F2126CB; };
+		99311C7072B0DEAD06939D03 = { isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "PlayerView.swift"; sourceTree = "<group>"; };
+		2D92BF1645FAEB9D099F10E6 = { isa = PBXBuildFile; fileRef = 99311C7072B0DEAD06939D03; };
+		7C0A2D0BDA276136C24D7E30 = { isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "RepeaterPlayer.swift"; sourceTree = "<group>"; };
+		63EE062AD942C06E547CBC05 = { isa = PBXBuildFile; fileRef = 7C0A2D0BDA276136C24D7E30; };
+		68E77A9D7BC78A97D4F4E27B = { isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = Info.plist; sourceTree = "<group>"; };
+		8119A4784A182D847E337D77 = { isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
+		FB90684E69A6C96ED866993E = { isa = PBXBuildFile; fileRef = 8119A4784A182D847E337D77; };
+		38A007151ABE87CC01A5B6E9 = { isa = PBXFileReference; explicitFileType = wrapper.application; path = LCRepeater.app; sourceTree = BUILT_PRODUCTS_DIR; };
+		BCE16DD0260827ECF338C787 = { isa = PBXSourcesBuildPhase; buildActionMask = 2147483647; files = (D8B6D1E2901BCFD0C1519960, 03C7A8A389A93A0B022CA62C, 712D12D2BB17294D9A5ABC14, C7FFF0A066D6CF65663ECBAF, 0CFBEBF3E82F8CAFDD299718, 2D92BF1645FAEB9D099F10E6, 63EE062AD942C06E547CBC05,); runOnlyForDeploymentPostprocessing = 0; };
+		0189424A5A60FED329FA868E = { isa = PBXResourcesBuildPhase; buildActionMask = 2147483647; files = (FB90684E69A6C96ED866993E,); runOnlyForDeploymentPostprocessing = 0; };
+		7561BFB015D8F536760CB671 = { isa = PBXFrameworksBuildPhase; buildActionMask = 2147483647; files = (); runOnlyForDeploymentPostprocessing = 0; };
+		679D4E7F0BF78E2DB7F85A4B = { isa = PBXGroup; children = (A3E6DD06FCBFA8D54C9463EF, 816CA21352D3C35FBE49D535, B0D35430A9A37E8F7E6A6059, 3AD605BF5DBC68B141495805, 7761F420BEEFBB737F2126CB, 99311C7072B0DEAD06939D03, 7C0A2D0BDA276136C24D7E30, 68E77A9D7BC78A97D4F4E27B, 8119A4784A182D847E337D77,); path = LCRepeater; sourceTree = "<group>"; };
+		00C45FD35CB0F9C5F764F070 = { isa = PBXGroup; children = (38A007151ABE87CC01A5B6E9,); name = Products; sourceTree = "<group>"; };
+		ADCF10F76EBF2A74473E9DC4 = { isa = PBXGroup; children = (679D4E7F0BF78E2DB7F85A4B, 00C45FD35CB0F9C5F764F070,); sourceTree = "<group>"; };
+		AB52CB08E0FDF02BF6C67C33 = { isa = XCBuildConfiguration; buildSettings = { SDKROOT = "iphoneos"; IPHONEOS_DEPLOYMENT_TARGET = "17.0"; SWIFT_VERSION = "5.0"; CLANG_ENABLE_MODULES = "YES"; CLANG_ENABLE_OBJC_ARC = "YES"; ENABLE_USER_SCRIPT_SANDBOXING = "YES"; SWIFT_STRICT_CONCURRENCY = "targeted"; }; name = Debug; };
+		5283471FF90C511CFE244FFF = { isa = XCBuildConfiguration; buildSettings = { SDKROOT = "iphoneos"; IPHONEOS_DEPLOYMENT_TARGET = "17.0"; SWIFT_VERSION = "5.0"; CLANG_ENABLE_MODULES = "YES"; CLANG_ENABLE_OBJC_ARC = "YES"; ENABLE_USER_SCRIPT_SANDBOXING = "YES"; SWIFT_STRICT_CONCURRENCY = "targeted"; }; name = Release; };
+		2286E03CAA13D178968C5C29 = { isa = XCConfigurationList; buildConfigurations = (AB52CB08E0FDF02BF6C67C33, 5283471FF90C511CFE244FFF,); defaultConfigurationIsVisible = 0; defaultConfigurationName = Release; };
+		59E1BEE911F66DA37FEBACDC = { isa = XCBuildConfiguration; buildSettings = { SDKROOT = "iphoneos"; IPHONEOS_DEPLOYMENT_TARGET = "17.0"; SWIFT_VERSION = "5.0"; PRODUCT_BUNDLE_IDENTIFIER = "com.firstghrn.lcrepeater.ios"; PRODUCT_NAME = "LCRepeater"; INFOPLIST_FILE = "LCRepeater/Info.plist"; GENERATE_INFOPLIST_FILE = "NO"; CODE_SIGN_STYLE = "Automatic"; ASSETCATALOG_COMPILER_APPICON_NAME = "AppIcon"; TARGETED_DEVICE_FAMILY = "1,2"; SUPPORTED_PLATFORMS = "iphoneos iphonesimulator"; SWIFT_OPTIMIZATION_LEVEL = "-Onone"; DEBUG_INFORMATION_FORMAT = "dwarf"; ENABLE_PREVIEWS = "YES"; SWIFT_ACTIVE_COMPILATION_CONDITIONS = "DEBUG"; }; name = Debug; };
+		F4C425279CD5DDD18FD6DC6D = { isa = XCBuildConfiguration; buildSettings = { SDKROOT = "iphoneos"; IPHONEOS_DEPLOYMENT_TARGET = "17.0"; SWIFT_VERSION = "5.0"; PRODUCT_BUNDLE_IDENTIFIER = "com.firstghrn.lcrepeater.ios"; PRODUCT_NAME = "LCRepeater"; INFOPLIST_FILE = "LCRepeater/Info.plist"; GENERATE_INFOPLIST_FILE = "NO"; CODE_SIGN_STYLE = "Automatic"; ASSETCATALOG_COMPILER_APPICON_NAME = "AppIcon"; TARGETED_DEVICE_FAMILY = "1,2"; SUPPORTED_PLATFORMS = "iphoneos iphonesimulator"; SWIFT_OPTIMIZATION_LEVEL = "-O"; DEBUG_INFORMATION_FORMAT = "dwarf-with-dsym"; ENABLE_PREVIEWS = "YES"; }; name = Release; };
+		CB723A9A468D5D3A71F5A482 = { isa = XCConfigurationList; buildConfigurations = (59E1BEE911F66DA37FEBACDC, F4C425279CD5DDD18FD6DC6D,); defaultConfigurationIsVisible = 0; defaultConfigurationName = Release; };
+		0E8A3AD980EC179856012B7E = { isa = PBXNativeTarget; buildConfigurationList = CB723A9A468D5D3A71F5A482; buildPhases = (BCE16DD0260827ECF338C787, 7561BFB015D8F536760CB671, 0189424A5A60FED329FA868E,); buildRules = (); dependencies = (); name = LCRepeater; productName = LCRepeater; productReference = 38A007151ABE87CC01A5B6E9; productType = "com.apple.product-type.application"; };
+		98F54143AB4E86B28C3AFEE0 = { isa = PBXProject; attributes = { LastUpgradeCheck = 1600; TargetAttributes = { 0E8A3AD980EC179856012B7E = { CreatedOnToolsVersion = 16.0; }; }; }; buildConfigurationList = 2286E03CAA13D178968C5C29; compatibilityVersion = "Xcode 14.0"; developmentRegion = ko; hasScannedForEncodings = 0; knownRegions = (en, ko, Base,); mainGroup = ADCF10F76EBF2A74473E9DC4; productRefGroup = 00C45FD35CB0F9C5F764F070; projectDirPath = ""; projectRoot = ""; targets = (0E8A3AD980EC179856012B7E,); };
+	};
+	rootObject = 98F54143AB4E86B28C3AFEE0;
+}
