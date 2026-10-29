@@ -183,17 +183,21 @@ private struct TrimView: View {
         self.sentence = sentence
         self.lessonDuration = lessonDuration
         self.save = save
-        _start = State(initialValue: sentence.start)
-        _end = State(initialValue: sentence.end)
+        let span = min(0.1, lessonDuration)
+        let initialStart = min(sentence.start, max(0, lessonDuration - span))
+        _start = State(initialValue: initialStart)
+        _end = State(initialValue: min(lessonDuration, max(sentence.end, initialStart + span)))
     }
+
+    private var minimumSpan: Double { min(0.1, lessonDuration) }
 
     var body: some View {
         NavigationStack {
             Form {
                 Section { Text(sentence.en) }
                 Section("0.1초씩 조절") {
-                    Stepper("시작 \(clock(start))", value: $start, in: max(0, end - 120)...max(0, end - 0.1), step: 0.1)
-                    Stepper("끝 \(clock(end))", value: $end, in: (start + 0.1)...min(lessonDuration, start + 120), step: 0.1)
+                    Stepper("시작 \(clock(start))", value: $start, in: max(0, end - 120)...max(0, end - minimumSpan), step: 0.1)
+                    Stepper("끝 \(clock(end))", value: $end, in: (start + minimumSpan)...min(lessonDuration, start + 120), step: 0.1)
                 }
                 Section { Text("고친 구간은 아이폰에 저장돼요. PC의 레슨은 바뀌지 않아요.").font(.caption) }
                 if let error { Section { Text(error).foregroundStyle(.red) } }

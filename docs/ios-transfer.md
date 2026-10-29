@@ -53,7 +53,7 @@ open ios/LCRepeater.xcodeproj
 
 `.github/workflows/ios.yml`은 관련 브랜치 푸시/PR 및 수동 실행을 지원한다. Actions에서 성공한 실행의 **LC-Repeater-iOS-unsigned** 아티팩트 ZIP을 다운로드하고, 압축을 풀어 IPA를 꺼낸다. 이 ZIP 자체를 Feather에 넣는 것은 아니다.
 
-빌드에는 Apple 로그인·인증서·UDID가 필요하지 않다. 사용자 인증서를 GitHub Secrets나 저장소에 올리지 않는다. 워크플로는 Swift/Python 계약 테스트, 실제 iPhone용 컴파일, 시뮬레이터 컴파일·실행을 수행한다.
+빌드에는 Apple 로그인·인증서·UDID가 필요하지 않다. 사용자 인증서를 GitHub Secrets나 저장소에 올리지 않는다. 워크플로는 Swift/Python 계약 테스트, 실제 iPhone용 컴파일, 시뮬레이터 컴파일·실행·레슨 가져오기 및 음원 열기를 수행한다. 시뮬레이터 검증은 Python으로 만든 합성 음원을 사용하며, 가져오기용 실행 인자는 Debug 빌드에만 포함된다.
 
 ### Feather에서 설치
 

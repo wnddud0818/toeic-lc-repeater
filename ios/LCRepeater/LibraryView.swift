@@ -6,9 +6,10 @@ struct LibraryView: View {
     @EnvironmentObject private var player: RepeaterPlayer
     @State private var showingImporter = false
     @State private var showingHelp = false
+    @State private var navigationPath: [UUID] = []
 
     var body: some View {
-        NavigationStack {
+        NavigationStack(path: $navigationPath) {
             Group {
                 if library.entries.isEmpty {
                     ContentUnavailableView {
@@ -126,7 +127,34 @@ struct LibraryView: View {
         .onChange(of: player.sentenceID) { _, value in
             library.savePosition(lessonID: player.lessonID, sentenceID: value)
         }
+        .task {
+            #if DEBUG
+            if CommandLine.arguments.contains("--smoke-test") { await runImportSmokeTest() }
+            #endif
+        }
     }
+
+    #if DEBUG
+    /// Used only by the simulator CI, with synthetic audio created by Python.
+    private func runImportSmokeTest() async {
+        guard let documents = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask).first else { return }
+        await library.importArchive(at: documents.appendingPathComponent("contract.lcrlesson"))
+        if let entry = library.entries.first {
+            player.load(entry, audioURL: library.audioURL(for: entry.id), savedSentence: 2)
+            navigationPath = [entry.id]
+        }
+        try? await Task.sleep(nanoseconds: 1_000_000_000)
+        let result: [String: Any] = [
+            "imported": library.entries.count,
+            "sentences": library.entries.first?.lesson.sentences.count ?? 0,
+            "current_sentence": player.sentenceID ?? 0,
+            "error": library.error ?? player.error ?? ""
+        ]
+        if let data = try? JSONSerialization.data(withJSONObject: result) {
+            try? data.write(to: documents.appendingPathComponent("smoke-result.json"), options: .atomic)
+        }
+    }
+    #endif
 }
 
 private struct TransferHelpView: View {

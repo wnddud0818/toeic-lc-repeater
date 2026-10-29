@@ -100,6 +100,8 @@ def prepare_export(lesson_dir):
                 raise ExportError('레슨 정보가 너무 큽니다')
             audio.seek(0)
             yield MAGIC + struct.pack('<Q', len(encoded)) + encoded, audio
+    except (BrokenPipeError, ConnectionResetError):
+        raise
     except (OSError, wave.Error, EOFError, json.JSONDecodeError) as exc:
         raise ExportError('레슨을 읽을 수 없습니다: %s' % exc) from exc
 

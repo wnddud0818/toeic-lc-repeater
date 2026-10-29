@@ -339,7 +339,7 @@ final class RepeaterPlayer: ObservableObject {
         observers.append(center.addObserver(forName: .AVAudioEngineConfigurationChange, object: engine, queue: .main) {
             [weak self] _ in
             Task { @MainActor [weak self] in
-                guard let self, !self.slots.isEmpty else { return }
+                guard let self, !self.engine.isRunning, !self.slots.isEmpty else { return }
                 self.resetQueue()
                 self.phase = "오디오 출력이 바뀌었어요. 재생을 다시 눌러 주세요."
                 self.updateNowPlaying()

@@ -43,6 +43,9 @@ def main():
     import server
     import webview
 
+    # Lesson export links download a .lcrlesson document from the local server.
+    webview.settings['ALLOW_DOWNLOADS'] = True
+
     server.start_worker()
     port = pick_port(APP_PORT)
     httpd = server.make_server('127.0.0.1', port)

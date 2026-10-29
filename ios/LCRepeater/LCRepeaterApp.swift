@@ -6,6 +6,7 @@ extension UTType {
 }
 
 @main
+@MainActor
 struct LCRepeaterApp: App {
     @StateObject private var library = LessonLibrary()
     @StateObject private var player = RepeaterPlayer()
