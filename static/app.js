@@ -101,7 +101,7 @@ function showSetup() {
   $app.innerHTML = `
     <div class="working setup">
       <h2>처음 한 번, 음성 인식 모델을 내려받을게요</h2>
-      <p>Whisper large-v3-turbo (약 547MB)를 huggingface.co에서 받아 이 맥에만 저장합니다.
+      <p>Whisper large-v3-turbo (약 547MB)를 huggingface.co에서 받아 이 PC에만 저장합니다.
          중간에 끊기면 받은 데까지 이어서 받습니다.</p>
       <div class="progress"><i id="dlbar" style="width:0%"></i></div>
       <p id="dltext" class="dl-text"></p>
@@ -378,7 +378,7 @@ class Player {
         <div class="keys"><kbd>Space</kbd> 재생/정지 · <kbd>←</kbd> <kbd>→</kbd> 이전/다음 · <kbd>T</kbd> 영어 공개/한국어/가리기 · <kbd>R</kbd> 처음부터</div>
         <div class="panel export-panel" id="exportPanel">
           <a class="btn" id="exportLink" download>아이폰용 레슨 내보내기</a>
-          <span>AirDrop이나 iCloud Drive로 옮긴 뒤 아이폰 앱에서 가져오세요.</span>
+          <span>아이폰으로 파일을 옮긴 뒤 앱에서 가져오세요.</span>
         </div>
       </div>
       <aside class="list-wrap">

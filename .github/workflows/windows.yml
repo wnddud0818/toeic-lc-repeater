@@ -1,0 +1,148 @@
+name: Build and verify Windows app
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main, 'codex/windows-*']
+    paths: ['*.py', 'static/**', 'build_windows.ps1', 'requirements-build.txt', 'installer/**', 'scripts/*windows*', 'tests/**', 'docs/windows.md', '.github/workflows/windows.yml']
+  pull_request:
+    branches: [main]
+    paths: ['*.py', 'static/**', 'build_windows.ps1', 'requirements-build.txt', 'installer/**', 'scripts/*windows*', 'tests/**', 'docs/windows.md', '.github/workflows/windows.yml']
+
+permissions:
+  contents: read
+
+concurrency:
+  group: windows-${{ github.event.pull_request.head.ref || github.ref_name }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    runs-on: windows-2022
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.12'
+          architecture: x64
+      - name: Check Python and player
+        run: |
+          python -m unittest discover -s tests -v
+          if ($LASTEXITCODE -ne 0) { throw 'Python tests failed' }
+          node --check static/app.js
+      - name: Restore Whisper build
+        id: whisper-cache
+        uses: actions/cache/restore@v4
+        with:
+          path: |
+            build/windows-tools/whisper-cli.exe
+            build/windows-tools/licenses/Whisper-MIT.txt
+          key: whisper195-windows2022-static-cpu-utf8-v1-${{ hashFiles('installer/whisper-utf8.manifest') }}
+      - name: Check out Whisper CPU source
+        if: steps.whisper-cache.outputs.cache-hit != 'true'
+        uses: actions/checkout@v4
+        with:
+          repository: ggml-org/whisper.cpp
+          ref: v1.9.5
+          path: build/whisper.cpp
+          persist-credentials: false
+      - name: Build standalone Whisper CPU executable
+        if: steps.whisper-cache.outputs.cache-hit != 'true'
+        run: |
+          cmake -S build/whisper.cpp -B build/whisper-windows -A x64 `
+            -DBUILD_SHARED_LIBS=OFF -DCMAKE_MSVC_RUNTIME_LIBRARY=MultiThreaded `
+            -DGGML_NATIVE=OFF -DGGML_OPENMP=OFF -DGGML_BLAS=OFF `
+            -DGGML_AVX=OFF -DGGML_AVX2=OFF -DGGML_AVX512=OFF -DGGML_FMA=OFF -DGGML_F16C=OFF `
+            -DWHISPER_BUILD_TESTS=OFF -DWHISPER_BUILD_SERVER=OFF
+          if ($LASTEXITCODE -ne 0) { throw 'Whisper configure failed' }
+          cmake --build build/whisper-windows --config Release --parallel 4 --target whisper-cli
+          if ($LASTEXITCODE -ne 0) { throw 'Whisper build failed' }
+          New-Item -ItemType Directory -Force build/windows-tools/licenses | Out-Null
+          Copy-Item build/whisper-windows/bin/Release/whisper-cli.exe build/windows-tools/
+          Copy-Item build/whisper.cpp/LICENSE build/windows-tools/licenses/Whisper-MIT.txt
+          $ManifestTool = Get-ChildItem "${env:ProgramFiles(x86)}/Windows Kits/10/bin/*/x64/mt.exe" | Sort-Object FullName -Descending | Select-Object -First 1
+          & $ManifestTool.FullName -manifest installer/whisper-utf8.manifest '-outputresource:build/windows-tools/whisper-cli.exe;#1'
+          if ($LASTEXITCODE -ne 0) { throw 'Whisper UTF-8 manifest embedding failed' }
+      - name: Cache Whisper build
+        if: steps.whisper-cache.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v4
+        with:
+          path: |
+            build/windows-tools/whisper-cli.exe
+            build/windows-tools/licenses/Whisper-MIT.txt
+          key: whisper195-windows2022-static-cpu-utf8-v1-${{ hashFiles('installer/whisper-utf8.manifest') }}
+      - name: Restore FFmpeg build
+        id: ffmpeg-cache
+        uses: actions/cache/restore@v4
+        with:
+          path: |
+            build/windows-tools/ffmpeg.exe
+            build/windows-tools/licenses/FFmpeg*
+            build/windows-tools/licenses/ffmpeg-9.0.2-source.tar.xz
+          key: ffmpeg902-windows2022-audio-${{ hashFiles('scripts/build_ffmpeg_windows.sh') }}
+      - name: Check out FFmpeg source
+        if: steps.ffmpeg-cache.outputs.cache-hit != 'true'
+        uses: actions/checkout@v4
+        with:
+          repository: FFmpeg/FFmpeg
+          ref: n9.0.2
+          path: build/ffmpeg-src
+          persist-credentials: false
+      - name: Set up MinGW compiler
+        if: steps.ffmpeg-cache.outputs.cache-hit != 'true'
+        uses: msys2/setup-msys2@v2
+        with:
+          msystem: MINGW64
+          update: false
+          install: mingw-w64-x86_64-gcc make diffutils pkgconf
+      - name: Build standalone audio converter and include corresponding source
+        if: steps.ffmpeg-cache.outputs.cache-hit != 'true'
+        shell: msys2 {0}
+        run: bash scripts/build_ffmpeg_windows.sh
+      - name: Cache FFmpeg build
+        if: steps.ffmpeg-cache.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v4
+        with:
+          path: |
+            build/windows-tools/ffmpeg.exe
+            build/windows-tools/licenses/FFmpeg*
+            build/windows-tools/licenses/ffmpeg-9.0.2-source.tar.xz
+          key: ffmpeg902-windows2022-audio-${{ hashFiles('scripts/build_ffmpeg_windows.sh') }}
+      - name: Build Windows application
+        run: ./build_windows.ps1
+      - name: Download Microsoft WebView2 bootstrapper
+        run: |
+          Invoke-WebRequest 'https://go.microsoft.com/fwlink/p/?LinkId=2124703' -OutFile build/MicrosoftEdgeWebview2Setup.exe
+          $Signature = Get-AuthenticodeSignature build/MicrosoftEdgeWebview2Setup.exe
+          if ($Signature.Status -ne 'Valid' -or $Signature.SignerCertificate.Subject -notmatch 'Microsoft Corporation') {
+            throw 'Microsoft WebView2 bootstrapper signature validation failed'
+          }
+      - name: Create per-user Windows installer
+        id: installer
+        run: |
+          $Compiler = 'C:/Program Files (x86)/Inno Setup 6/ISCC.exe'
+          if (-not (Test-Path $Compiler)) {
+            choco install innosetup --yes --no-progress
+            if ($LASTEXITCODE -ne 0) { throw 'Inno Setup installation failed' }
+          }
+          & $Compiler installer/windows.iss
+          if ($LASTEXITCODE -ne 0) { throw 'Installer build failed' }
+      - name: Install and test the actual packaged application
+        run: |
+          $InstallDir = Join-Path $env:RUNNER_TEMP 'LC Repeater Installed'
+          $Setup = Start-Process dist/LC-Repeater-Setup-x64.exe -ArgumentList @('/VERYSILENT', '/SUPPRESSMSGBOXES', '/NORESTART', "/DIR=`"$InstallDir`"") -Wait -PassThru
+          if ($Setup.ExitCode -ne 0) { throw "Installer failed: $($Setup.ExitCode)" }
+          python scripts/verify_windows.py "$InstallDir/LC Repeater.exe"
+          if ($LASTEXITCODE -ne 0) { throw 'Packaged application validation failed' }
+          $Hash = (Get-FileHash dist/LC-Repeater-Setup-x64.exe -Algorithm SHA256).Hash.ToLowerInvariant()
+          [IO.File]::WriteAllText((Join-Path $PWD 'dist/LC-Repeater-Setup-x64.exe.sha256'), "$Hash  LC-Repeater-Setup-x64.exe`n")
+      - name: Upload installer, checksum and native test report
+        uses: actions/upload-artifact@v4
+        with:
+          name: LC-Repeater-Windows-x64
+          path: |
+            dist/LC-Repeater-Setup-x64.exe
+            dist/LC-Repeater-Setup-x64.exe.sha256
+            dist/windows-smoke-result.json
+          if-no-files-found: error

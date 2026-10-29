@@ -1,16 +1,16 @@
 #!/usr/bin/env python3
-"""LC Repeater 맥 앱 실행 파일 (build_app.sh가 PyInstaller로 .app으로 묶는다)
+"""LC Repeater desktop entry point, packaged by PyInstaller on macOS and Windows.
 
-데이터와 모델은 ~/Library/Application Support/LC Repeater/ 에 둔다(앱 안에는 쓸 수 없다).
+데이터와 모델은 운영체제의 사용자 데이터 폴더에 둔다(앱 안에는 쓸 수 없다).
 개발 중에는 `.venv/bin/python app.py`로 바로 띄워 볼 수 있다.
 """
 import os
 import socket
 import sys
 import threading
+from desktop_runtime import support_dir
 
-SUPPORT_DIR = os.environ.get('LCR_SUPPORT_DIR') or \
-    os.path.expanduser('~/Library/Application Support/LC Repeater')
+SUPPORT_DIR = support_dir()
 APP_PORT = 18765   # 창 주소(=localStorage 저장 위치)가 실행마다 바뀌지 않게 고정 포트를 먼저 쓴다
 
 
@@ -52,10 +52,19 @@ def main():
     threading.Thread(target=httpd.serve_forever, daemon=True).start()
     print('LC Repeater 앱: http://127.0.0.1:%d (데이터: %s)' % (port, SUPPORT_DIR), flush=True)
 
-    webview.create_window('LC Repeater', 'http://127.0.0.1:%d/' % port,
-                          width=1180, height=820, min_size=(380, 560))
+    base_url = 'http://127.0.0.1:%d' % port
+    smoke_report = sys.argv[2] if len(sys.argv) == 3 and sys.argv[1] == '--smoke-test' else None
+    if smoke_report and not os.environ.get('LCR_SUPPORT_DIR'):
+        raise RuntimeError('--smoke-test requires an isolated LCR_SUPPORT_DIR')
+    url = base_url + ('/#/l/test-lesson' if smoke_report else '/')
+    window = webview.create_window('LC Repeater', url,
+                                   width=1180, height=820, min_size=(380, 560))
+    if smoke_report:
+        from desktop_smoke import check_window
+        window.events.loaded += lambda: check_window(window, base_url, smoke_report)
     # private_mode=False여야 설정·이어 듣기 위치(localStorage)가 앱을 껐다 켜도 남는다
-    webview.start(private_mode=False, storage_path=os.path.join(SUPPORT_DIR, 'webview'))
+    webview.start(gui='edgechromium' if sys.platform == 'win32' else None,
+                  private_mode=False, storage_path=os.path.join(SUPPORT_DIR, 'webview'))
     httpd.shutdown()
 
 
