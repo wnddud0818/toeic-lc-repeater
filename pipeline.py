@@ -24,6 +24,7 @@ import threading
 import time
 import wave
 from concurrent.futures import ThreadPoolExecutor
+from desktop_runtime import child_process_options
 
 ROOT = os.path.dirname(os.path.abspath(__file__))
 # PyInstaller로 묶은 앱이면 함께 넣은 파일(static/, bin/)은 여기에 있다
@@ -73,6 +74,13 @@ def find_bin(name, env_key, login_shell=False):
     """
     if os.environ.get(env_key):
         return os.environ[env_key]
+    if sys.platform == 'win32':
+        # Native Claude installs here; npm shims are resolved below if necessary.
+        for directory in (os.path.expanduser('~/.local/bin'),):
+            p = os.path.join(directory, name + '.exe')
+            if os.path.isfile(p):
+                return p
+        return shutil.which(name + '.exe') or shutil.which(name)
     found = shutil.which(name)
     if found:
         return found
@@ -95,14 +103,14 @@ def find_bin(name, env_key, login_shell=False):
     return None
 
 
-def bundled_whisper():
-    p = os.path.join(BUNDLE_DIR, 'bin', 'whisper-cli')
+def bundled_bin(name):
+    p = os.path.join(BUNDLE_DIR, 'bin', name + ('.exe' if sys.platform == 'win32' else ''))
     return p if os.path.exists(p) else None
 
 
 AFCONVERT = find_bin('afconvert', 'AFCONVERT_BIN')
-FFMPEG = find_bin('ffmpeg', 'FFMPEG_BIN')
-WHISPER = os.environ.get('WHISPER_BIN') or bundled_whisper() or find_bin('whisper-cli', 'WHISPER_BIN')
+FFMPEG = os.environ.get('FFMPEG_BIN') or bundled_bin('ffmpeg') or find_bin('ffmpeg', 'FFMPEG_BIN')
+WHISPER = os.environ.get('WHISPER_BIN') or bundled_bin('whisper-cli') or find_bin('whisper-cli', 'WHISPER_BIN')
 WHISPER_MODEL = os.environ.get('WHISPER_MODEL') or os.path.join(ROOT, 'models', MODEL_NAME)
 CLAUDE_MODEL = os.environ.get('CLAUDE_MODEL', 'sonnet')
 _claude = []
@@ -113,6 +121,18 @@ def claude_bin():
     if not _claude:
         _claude.append(find_bin('claude', 'CLAUDE_BIN', login_shell=True))
     return _claude[0]
+
+
+def claude_command(path):
+    if sys.platform == 'win32' and os.path.splitext(path)[1].lower() in ('.cmd', '.bat'):
+        # Invoke the npm JavaScript entry point directly: cmd.exe would reinterpret
+        # quotes/metacharacters in the translation prompt passed as an argument.
+        entry = os.path.join(os.path.dirname(path), 'node_modules', '@anthropic-ai', 'claude-code', 'cli.js')
+        node = shutil.which('node.exe')
+        if not node or not os.path.isfile(entry):
+            raise NotLoggedIn('Claude Code 네이티브 Windows 버전을 설치하고 로그인해 주세요.')
+        return [node, entry]
+    return [path]
 
 
 def configure(data_dir=None, model_path=None):
@@ -169,7 +189,8 @@ def decode(src, dst, rate):
     """오디오를 16비트 모노 WAV로. 맥 내장 afconvert를 쓰고, 못 읽는 형식(ogg 등)만 ffmpeg로."""
     if AFCONVERT:
         proc = subprocess.run([AFCONVERT, '-f', 'WAVE', '-d', 'LEI16@%d' % rate, '-c', '1', src, dst],
-                              stdout=subprocess.PIPE, stderr=subprocess.STDOUT, universal_newlines=True)
+                              stdin=subprocess.DEVNULL, stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
+                              encoding='utf-8', errors='replace', **child_process_options())
         if proc.returncode == 0:
             return
         if not FFMPEG:
@@ -177,10 +198,13 @@ def decode(src, dst, rate):
                                + proc.stdout.strip()[-300:])
     if not FFMPEG:
         raise RuntimeError('오디오 변환 도구(afconvert 또는 ffmpeg)가 없습니다')
-    subprocess.run(
+    proc = subprocess.run(
         [FFMPEG, '-nostdin', '-loglevel', 'error', '-y', '-i', src,
          '-ac', '1', '-ar', str(rate), '-c:a', 'pcm_s16le', dst],
-        check=True)
+        stdin=subprocess.DEVNULL, stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
+        encoding='utf-8', errors='replace', **child_process_options())
+    if proc.returncode:
+        raise RuntimeError('오디오 변환 실패: ' + proc.stdout.strip()[-500:])
 
 
 def wav_duration(path):
@@ -232,7 +256,7 @@ def detect_silences(path, min_dur=0.15, window=0.01):
 
 def transcribe(wav16, out_prefix, on_progress=None):
     if not WHISPER:
-        raise RuntimeError('whisper-cli를 찾을 수 없습니다. ./setup.sh 를 먼저 실행하세요.')
+        raise RuntimeError('whisper-cli를 찾을 수 없습니다. 앱을 다시 설치하거나 WHISPER_BIN을 설정해 주세요.')
     if not os.path.isfile(WHISPER_MODEL):
         raise RuntimeError('Whisper 모델이 없습니다: ' + WHISPER_MODEL)
     cmd = [WHISPER, '-m', WHISPER_MODEL, '-f', wav16, '-l', 'en',
@@ -241,7 +265,8 @@ def transcribe(wav16, out_prefix, on_progress=None):
            '-nfa', '-dtw', 'large.v3.turbo',
            '-t', str(min(8, os.cpu_count() or 4))]
     proc = subprocess.Popen(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.PIPE,
-                            universal_newlines=True, bufsize=1)
+                            stdin=subprocess.DEVNULL, encoding='utf-8', errors='replace', bufsize=1,
+                            **child_process_options())
     tail = []
     for line in proc.stderr:
         tail = (tail + [line])[-20:]
@@ -485,10 +510,11 @@ def translate_chunk(chunk):
     for _ in range(2):
         with tempfile.TemporaryDirectory() as tmp:
             proc = subprocess.run(
-                [claude, '-p', TRANSLATE_PROMPT, '--output-format', 'json',
+                claude_command(claude) + ['-p', TRANSLATE_PROMPT, '--output-format', 'json',
                  '--model', CLAUDE_MODEL, '--no-session-persistence'],
                 input=lines, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
-                universal_newlines=True, cwd=tmp, env=_claude_env(), timeout=900)
+                encoding='utf-8', errors='replace', cwd=tmp, env=_claude_env(), timeout=900,
+                **child_process_options())
         try:
             try:
                 outer = json.loads(proc.stdout)

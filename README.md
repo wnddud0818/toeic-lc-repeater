@@ -8,12 +8,19 @@ mp3를 올리면 문장 단위로 잘라 주고, 문장마다 한국어 번역�
 
 SwiftUI 앱(iOS 17+)은 PC에서 처리한 레슨을 가져와 오프라인으로 반복 재생한다.
 
-1. 맥 앱/웹 플레이어의 **아이폰용 레슨 내보내기**로 `.lcrlesson` 파일을 저장한다.
+1. PC 앱/웹 플레이어의 **아이폰용 레슨 내보내기**로 `.lcrlesson` 파일을 저장한다.
 2. AirDrop이나 iCloud Drive로 옮기고 아이폰 앱의 **가져오기**에서 연다.
 3. 앱 IPA는 `bash scripts/build_ios.sh` 또는 GitHub Actions로 빌드하고 Feather에서 직접 서명·설치한다.
 
-PC 처리와 아이폰 학습은 분리되어 있어, 가져온 뒤 맥을 켜 두거나 서버에 접속할 필요가 없다.
+PC 처리와 아이폰 학습은 분리되어 있어, 가져온 뒤 PC를 켜 두거나 서버에 접속할 필요가 없다.
 빌드·Feather 설치·전달 형식·검증 범위는 [아이폰 앱 안내](docs/ios-transfer.md)에 정리했다.
+
+## 윈도우 앱으로 쓰기
+
+Windows 10/11 64비트에서 `LC-Repeater-Setup-x64.exe`를 실행한다.
+FFmpeg·whisper-cli는 포함되어 있고, WebView2가 없으면 설치 중 준비한다.
+첫 실행 때 모델을 내려받으며, 데이터는 `%LOCALAPPDATA%\LC Repeater\`에 저장된다.
+설치·번역 준비·빌드·검증 범위는 [Windows 앱 안내](docs/windows.md)를 참고한다.
 
 ## 맥 앱으로 쓰기
 
@@ -62,7 +69,7 @@ python3 pipeline.py --resegment <id>    # 받아쓰기는 그대로 두고 문�
 
 ## 처리 방식
 
-1. 맥 내장 `afconvert`로 재생용 `master.wav`(32kHz 모노)와 인식용 16kHz wav를 만든다(ffmpeg 불필요).
+1. 맥은 내장 `afconvert`, Windows는 함께 넣은 FFmpeg로 재생용 `master.wav`(32kHz 모노)와 인식용 16kHz wav를 만든다.
 2. whisper.cpp로 받아쓴다. 앞 문장 문맥을 끊어(`-mc 0`) 보기 기호(A. B. C.)가 대화 문장에 잘못 붙는 것을 막고, 토큰별 시각(DTW)을 함께 받는다.
 3. 문장부호와 쉼으로 문장을 나눈다. Whisper 시각은 0.1~0.6초씩 흔들려서, 문장 경계는 무음 구간(10ms 단위로 파일 평균보다 16dB 이상 조용한 곳) 안으로 옮기고 앞 0.12초, 뒤 0.2초의 여유를 둔다.
    - Whisper가 가끔 한 구간을 문장부호 없이 받아쓴다. 그런 덩어리는 0.33초 이상 쉬는 곳마다 자른다(문장 끝 쉼은 대개 이보다 길고 쉼표 자리는 짧다). 문장부호가 있어도 10초가 넘으면 가장 긴 쉼에서 자른다.
