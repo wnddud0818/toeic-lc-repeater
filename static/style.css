@@ -186,6 +186,7 @@ main { max-width: 1180px; margin: 0 auto; padding: 20px 16px 48px; }
   font-size: clamp(22px, 3.4vw, 32px); line-height: 1.4; font-weight: 600; letter-spacing: -.01em;
   word-break: keep-all; overflow-wrap: anywhere;
 }
+.sentence.blurred { filter: blur(8px); }
 .card.ko .sentence { color: var(--ko); }
 .sentence.muted { color: var(--text-3); font-weight: 500; font-size: 18px; }
 .card-hint { color: var(--text-3); font-size: 12.5px; text-align: center; }
