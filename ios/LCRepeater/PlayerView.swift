@@ -4,7 +4,6 @@ struct PlayerView: View {
     let entry: LibraryEntry
     @EnvironmentObject private var library: LessonLibrary
     @EnvironmentObject private var player: RepeaterPlayer
-    @State private var showingKorean = false
     @State private var showingSentences = false
     @State private var trimming: Sentence?
 
@@ -12,32 +11,9 @@ struct PlayerView: View {
         ScrollView {
             VStack(spacing: 22) {
                 if let sentence = player.currentSentence, player.lessonID == entry.id {
-                    Button { showingKorean.toggle() } label: {
-                        VStack(alignment: .leading, spacing: 22) {
-                            HStack {
-                                Text("\(player.position + 1) / \(player.visibleSentences.count)")
-                                Spacer()
-                                Text(showingKorean ? "KO" : "EN").fontWeight(.bold)
-                            }
-                            .font(.caption).foregroundStyle(.secondary)
-                            Text(showingKorean ? (sentence.ko.isEmpty ? "번역이 아직 없어요" : sentence.ko) : sentence.en)
-                                .font(.title2.weight(.semibold)).foregroundStyle(.primary)
-                                .frame(maxWidth: .infinity, minHeight: 120, alignment: .leading)
-                                .multilineTextAlignment(.leading)
-                            HStack {
-                                if sentence.kind == "direction" { Text("시험 안내").foregroundStyle(.orange) }
-                                Spacer()
-                                Text(showingKorean ? "탭하면 영어" : "탭하면 한국어")
-                            }
-                            .font(.caption).foregroundStyle(.secondary)
-                        }
-                        .padding(24)
-                        .background(showingKorean ? Color.accentColor.opacity(0.09) : Color(.secondarySystemGroupedBackground),
-                                    in: RoundedRectangle(cornerRadius: 22))
-                    }
-                    .buttonStyle(.plain)
-                    .accessibilityLabel(showingKorean ? "한국어 문장. 탭하면 영어" : "영어 문장. 탭하면 한국어")
-                    .accessibilityValue(showingKorean ? sentence.ko : sentence.en)
+                    SentenceCard(sentence: sentence, position: player.position,
+                                 count: player.visibleSentences.count)
+                        .id("\(entry.id.uuidString):\(sentence.i)")
 
                     VStack(spacing: 10) {
                         HStack(alignment: .firstTextBaseline) {
@@ -122,7 +98,6 @@ struct PlayerView: View {
             player.load(entry, audioURL: library.audioURL(for: entry.id), savedSentence: keep)
             if wasPlaying { player.play(sentenceID: keep) }
         }
-        .onChange(of: player.sentenceID) { _, _ in showingKorean = false }
         .sheet(isPresented: $showingSentences) {
             NavigationStack {
                 List(player.visibleSentences) { sentence in
@@ -163,6 +138,78 @@ struct PlayerView: View {
 
     private func settingRow<Content: View>(_ title: String, @ViewBuilder content: () -> Content) -> some View {
         HStack { Text(title); Spacer(); content().labelsHidden().pickerStyle(.menu) }
+    }
+}
+
+private struct SentenceCard: View {
+    let sentence: Sentence
+    let position: Int
+    let count: Int
+    @State private var face = Face.blurredEnglish
+
+    private enum Face: Equatable {
+        case blurredEnglish, english, korean
+
+        var next: Self {
+            switch self {
+            case .blurredEnglish: return .english
+            case .english: return .korean
+            case .korean: return .blurredEnglish
+            }
+        }
+
+        var hint: String {
+            switch self {
+            case .blurredEnglish: return "탭하면 영어 공개"
+            case .english: return "탭하면 한국어"
+            case .korean: return "탭하면 영어 가리기"
+            }
+        }
+
+        var accessibilityLabel: String {
+            switch self {
+            case .blurredEnglish: return "영어가 가려진 문장. 탭하면 영어 공개"
+            case .english: return "영어 문장. 탭하면 한국어"
+            case .korean: return "한국어 문장. 탭하면 영어 가리기"
+            }
+        }
+    }
+
+    private var text: String {
+        face == .korean ? (sentence.ko.isEmpty ? "번역이 아직 없어요" : sentence.ko) : sentence.en
+    }
+
+    var body: some View {
+        Button {
+            withAnimation(.easeInOut(duration: 0.18)) { face = face.next }
+        } label: {
+            VStack(alignment: .leading, spacing: 22) {
+                HStack {
+                    Text("\(position + 1) / \(count)")
+                    Spacer()
+                    Text(face == .korean ? "KO" : "EN").fontWeight(.bold)
+                }
+                .font(.caption).foregroundStyle(.secondary)
+                Text(text)
+                    .font(.title2.weight(.semibold)).foregroundStyle(.primary)
+                    .frame(maxWidth: .infinity, minHeight: 120, alignment: .leading)
+                    .multilineTextAlignment(.leading)
+                    .blur(radius: face == .blurredEnglish ? 8 : 0)
+                HStack {
+                    if sentence.kind == "direction" { Text("시험 안내").foregroundStyle(.orange) }
+                    Spacer()
+                    Text(face.hint)
+                }
+                .font(.caption).foregroundStyle(.secondary)
+            }
+            .padding(24)
+            .background(face == .korean ? Color.accentColor.opacity(0.09) : Color(.secondarySystemGroupedBackground),
+                        in: RoundedRectangle(cornerRadius: 22))
+        }
+        .buttonStyle(.plain)
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel(face.accessibilityLabel)
+        .accessibilityValue(face == .blurredEnglish ? "" : text)
     }
 }
 
