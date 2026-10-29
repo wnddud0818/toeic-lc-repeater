@@ -293,7 +293,8 @@ class Player {
     this.status = data.status || {};
     this.order = [];
     this.pos = 0;
-    this.showKo = false;
+    this.cardFace = 'blurredEnglish';
+    this.cardSentenceI = null;
     this.rep = 0;
     this.phase = 'idle';          // idle | playing | gap | paused | done
     this.timer = null;
@@ -339,7 +340,7 @@ class Player {
     <div class="player">
       <div class="stage">
         <div id="banner"></div>
-        <div class="card" id="card" tabindex="0" role="button" aria-label="영어와 한국어 전환">
+        <div class="card" id="card" tabindex="0" role="button" aria-label="영어 공개">
           <div class="card-meta"><span id="pos"></span><span class="lang" id="lang">EN</span></div>
           <p class="sentence" id="sentence"></p>
           <div class="card-hint" id="hint"></div>
@@ -353,7 +354,7 @@ class Player {
           <button class="btn-icon" id="prev" title="이전 문장 (←)" aria-label="이전 문장">${ICON.prev}</button>
           <button class="btn-icon primary" id="play" aria-label="재생/정지"></button>
           <button class="btn-icon" id="next" title="다음 문장 (→)" aria-label="다음 문장">${ICON.next}</button>
-          <button class="btn-icon" id="langBtn" title="번역 보기 (T)" aria-label="번역 보기"><b>한</b></button>
+          <button class="btn-icon" id="langBtn" title="영어 공개 (T)" aria-label="영어 공개"><b>EN</b></button>
         </div>
         <div class="panel">
           <div class="settings">
@@ -374,7 +375,7 @@ class Player {
           <span class="trim-group">끝 <button class="btn-sm" data-trim="end" data-d="-0.1">−0.1</button><button class="btn-sm" data-trim="end" data-d="0.1">+0.1</button></span>
           <span class="trim-range" id="range"></span>
         </div>
-        <div class="keys"><kbd>Space</kbd> 재생/정지 · <kbd>←</kbd> <kbd>→</kbd> 이전/다음 · <kbd>T</kbd> 번역 · <kbd>R</kbd> 처음부터</div>
+        <div class="keys"><kbd>Space</kbd> 재생/정지 · <kbd>←</kbd> <kbd>→</kbd> 이전/다음 · <kbd>T</kbd> 영어 공개/한국어/가리기 · <kbd>R</kbd> 처음부터</div>
         <div class="panel export-panel" id="exportPanel">
           <a class="btn" id="exportLink" download>아이폰용 레슨 내보내기</a>
           <span>AirDrop이나 iCloud Drive로 옮긴 뒤 아이폰 앱에서 가져오세요.</span>
@@ -527,7 +528,6 @@ class Player {
     this.audio.pause();
     this.pos = p;
     this.rep = 0;
-    this.showKo = false;
     store.set('lcr.pos.' + this.id, this.cur().i);
     this.renderAll();
     this.playOnce();      // 클릭 이벤트 안에서 바로 재생해야 iOS에서도 소리가 난다
@@ -535,7 +535,7 @@ class Player {
   }
 
   toggleLang() {
-    this.showKo = !this.showKo;
+    this.cardFace = { blurredEnglish: 'english', english: 'korean', korean: 'blurredEnglish' }[this.cardFace];
     this.renderCard();
   }
 
@@ -643,11 +643,20 @@ class Player {
   renderCard() {
     const el = this.el;
     const s = this.cur();
+    if (this.cardSentenceI !== s.i) {
+      this.cardSentenceI = s.i;
+      this.cardFace = 'blurredEnglish';
+    }
+    const showKo = this.cardFace === 'korean';
+    const blurred = this.cardFace === 'blurredEnglish';
+    const action = blurred ? '영어 공개' : showKo ? '영어 가리기' : '한국어 보기';
     el.pos.textContent = `${this.pos + 1} / ${this.order.length}`;
-    el.lang.textContent = this.showKo ? 'KO' : 'EN';
-    el.card.classList.toggle('ko', this.showKo);
+    el.lang.textContent = showKo ? 'KO' : 'EN';
+    el.card.classList.toggle('ko', showKo);
     el.sentence.classList.remove('muted');
-    if (!this.showKo) {
+    el.sentence.classList.toggle('blurred', blurred);
+    el.sentence.setAttribute('aria-hidden', String(blurred));
+    if (!showKo) {
       el.sentence.innerHTML = esc(s.en) + (s.kind === 'direction' ? '<span class="tag-direction">안내</span>' : '');
     } else if (s.ko) {
       el.sentence.textContent = s.ko;
@@ -655,7 +664,12 @@ class Player {
       el.sentence.textContent = this.status.stage === 'translate' ? '번역하는 중이에요…' : '번역이 아직 없어요';
       el.sentence.classList.add('muted');
     }
-    el.hint.textContent = this.showKo ? '탭하면 영어' : '탭하면 한국어';
+    el.hint.textContent = blurred ? '탭하면 영어 공개' : showKo ? '탭하면 영어 가리기' : '탭하면 한국어';
+    const accessibleText = blurred ? '영어가 가려져 있어요' : `${showKo ? '한국어' : '영어'}, ${el.sentence.textContent}`;
+    el.card.setAttribute('aria-label', `${this.pos + 1}번째 문장, ${accessibleText}. ${action}`);
+    el.langBtn.innerHTML = `<b>${blurred ? 'EN' : showKo ? '가림' : '한'}</b>`;
+    el.langBtn.title = `${action} (T)`;
+    el.langBtn.setAttribute('aria-label', action);
     el.prev.disabled = this.pos <= 0;
     el.next.disabled = this.pos >= this.order.length - 1;
     el.range.textContent = `${fmtClock(s.start)} – ${fmtClock(s.end)} (${(s.end - s.start).toFixed(1)}초)`;
