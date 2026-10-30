@@ -85,7 +85,9 @@ struct LocalLessonView: View {
             }
         }
         .translationTask(configuration) { session in
-            if let id = await processor.run(session: session, library: library) { onComplete(id) }
+            if let id = await processor.run(session: session, library: library) {
+                await MainActor.run { onComplete(id) }
+            }
         }
         .task { await checkAvailability() }
         .onChange(of: processor.isBusy) { _, busy in UIApplication.shared.isIdleTimerDisabled = busy }

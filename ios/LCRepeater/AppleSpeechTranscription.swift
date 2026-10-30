@@ -9,7 +9,7 @@ actor AppleSpeechTranscription {
     }
 
     func transcribe(audioURL: URL, duration: Double,
-                    progress: @Sendable (Double) async -> Void) async throws -> [TimedTranscriptPiece] {
+                    progress: @escaping @Sendable (Double) async -> Void) async throws -> [TimedTranscriptPiece] {
         guard SpeechTranscriber.isAvailable else { throw LocalLessonError.unsupportedDevice }
         guard let locale = await Self.englishLocale() else { throw LocalLessonError.unsupportedEnglish }
         let transcriber = SpeechTranscriber(locale: locale, transcriptionOptions: [],
@@ -30,7 +30,8 @@ actor AppleSpeechTranscription {
                 for run in result.text.runs {
                     let text = String(result.text[run.range].characters)
                     if text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty { continue }
-                    guard let range = run.audioTimeRange else { needsFallback = true; break }
+                    guard let range = run[AttributeScopes.SpeechAttributes.TimeRangeAttribute.self]
+                    else { needsFallback = true; break }
                     timed.append(.init(text: text, start: range.start.seconds,
                                        end: CMTimeRangeGetEnd(range).seconds))
                 }
