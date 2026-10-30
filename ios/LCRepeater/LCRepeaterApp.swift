@@ -13,13 +13,9 @@ struct LCRepeaterApp: App {
 
     var body: some Scene {
         WindowGroup {
-            LibraryView()
+            AppHomeView()
                 .environmentObject(library)
                 .environmentObject(player)
-                .onOpenURL { url in
-                    guard url.isFileURL else { return }
-                    Task { await library.importArchive(at: url) }
-                }
         }
     }
 }

@@ -4,6 +4,12 @@ set -euo pipefail
 cd "$(dirname "$0")/.."
 
 command -v xcodebuild >/dev/null || { echo 'macOS와 Xcode가 필요합니다.' >&2; exit 1; }
+LCR_IOS_SDK=$(xcrun --sdk iphoneos --show-sdk-version)
+python3 - "$LCR_IOS_SDK" <<'PY'
+import sys
+if tuple(map(int, sys.argv[1].split('.')[:2])) < (26, 4):
+    raise SystemExit('기기 내 일반 번역 모델을 선택하려면 Xcode/iOS SDK 26.4 이상이 필요합니다.')
+PY
 python3 scripts/generate_ios_project.py --check
 LCR_BUNDLE_ID="${LCR_BUNDLE_ID:-com.firstghrn.lcrepeater.ios}"
 mkdir -p dist

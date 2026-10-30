@@ -18,10 +18,19 @@ concurrency:
 
 jobs:
   build:
-    runs-on: macos-15
+    runs-on: macos-26
     timeout-minutes: 30
     steps:
       - uses: actions/checkout@v4
+      - name: Confirm SDK supports non-Apple-Intelligence translation strategy
+        run: |
+          xcodebuild -version
+          xcrun --sdk iphoneos --show-sdk-version
+          python3 - <<'PY'
+          import subprocess
+          version = subprocess.check_output(['xcrun', '--sdk', 'iphoneos', '--show-sdk-version'], text=True).strip()
+          assert tuple(map(int, version.split('.')[:2])) >= (26, 4), version
+          PY
       - name: Check project and Python export
         run: |
           python3 scripts/generate_ios_project.py --check
@@ -49,6 +58,10 @@ jobs:
           LCR_APP_DATA=$(xcrun simctl get_app_container "$LCR_SIMULATOR" com.firstghrn.lcrepeater.ios data)
           mkdir -p "$LCR_APP_DATA/Documents"
           cp "$RUNNER_TEMP/contract.lcrlesson" "$LCR_APP_DATA/Documents/contract.lcrlesson"
+          xcrun simctl launch "$LCR_SIMULATOR" com.firstghrn.lcrepeater.ios
+          sleep 2
+          xcrun simctl io "$LCR_SIMULATOR" screenshot dist/ios-start-preview.png
+          xcrun simctl terminate "$LCR_SIMULATOR" com.firstghrn.lcrepeater.ios
           xcrun simctl launch "$LCR_SIMULATOR" com.firstghrn.lcrepeater.ios --smoke-test
           for LCR_TRY in {1..30}; do
             if [ -f "$LCR_APP_DATA/Documents/smoke-result.json" ]; then break; fi
@@ -62,6 +75,25 @@ jobs:
           print('Simulator import and audio-file load passed')
           PY
           xcrun simctl io "$LCR_SIMULATOR" screenshot dist/ios-player-preview.png
+          xcrun simctl terminate "$LCR_SIMULATOR" com.firstghrn.lcrepeater.ios
+          xcrun simctl launch "$LCR_SIMULATOR" com.firstghrn.lcrepeater.ios --smoke-local-test
+          for LCR_TRY in {1..30}; do
+            if [ -f "$LCR_APP_DATA/Documents/local-smoke-result.json" ]; then break; fi
+            sleep 1
+          done
+          python3 - "$LCR_APP_DATA/Documents/local-smoke-result.json" <<'PY'
+          import json, sys
+          with open(sys.argv[1]) as source:
+              result = json.load(source)
+          assert result == {'source': 'fixture', 'created': True, 'sentences': 2, 'sample_rate': 32000, 'channels': 1, 'frames': 64000, 'saved_sentence': 2}, result
+          print('Local audio conversion, segmentation, storage and playback fixture passed (no model inference)')
+          PY
+          cp "$LCR_APP_DATA/Documents/local-smoke-result.json" dist/ios-local-smoke-result.json
+          xcrun simctl io "$LCR_SIMULATOR" screenshot dist/ios-local-player-preview.png
+          xcrun simctl terminate "$LCR_SIMULATOR" com.firstghrn.lcrepeater.ios
+          xcrun simctl launch "$LCR_SIMULATOR" com.firstghrn.lcrepeater.ios --smoke-device-screen
+          sleep 2
+          xcrun simctl io "$LCR_SIMULATOR" screenshot dist/ios-local-availability-preview.png
       - name: Upload IPA, checksum, and simulator preview
         if: ${{ !cancelled() && steps.ipa.outcome == 'success' }}
         uses: actions/upload-artifact@v4
@@ -71,4 +103,8 @@ jobs:
             dist/LC-Repeater-unsigned.ipa
             dist/LC-Repeater-unsigned.ipa.sha256
             dist/ios-player-preview.png
+            dist/ios-start-preview.png
+            dist/ios-local-player-preview.png
+            dist/ios-local-availability-preview.png
+            dist/ios-local-smoke-result.json
           if-no-files-found: error
