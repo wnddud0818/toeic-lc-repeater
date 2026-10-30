@@ -1,5 +1,5 @@
 import Foundation
-import AVFoundation
+@preconcurrency import AVFoundation
 
 struct PreparedLocalAudio: Sendable {
     let url: URL
@@ -10,6 +10,7 @@ actor LocalAudioPreparer {
     /// Copy provider-backed files while access is held, then stream to the existing lesson format.
     func prepare(source: URL, folder: URL,
                  progress: @Sendable (Double) async -> Void) async throws -> PreparedLocalAudio {
+        try Task.checkCancellation()
         let accessed = source.startAccessingSecurityScopedResource()
         let copy = folder.appendingPathComponent("source").appendingPathExtension(source.pathExtension)
         defer {
@@ -53,9 +54,12 @@ actor LocalAudioPreparer {
             try Task.checkCancellation()
             var conversionError: NSError?
             let status = converter.convert(to: outputBuffer, error: &conversionError) { count, state in
-                if eof { state.pointee = .endOfStream; return nil }
+                let remaining = input.length - input.framePosition
+                if eof || remaining <= 0 { state.pointee = .endOfStream; return nil }
+                if count == 0 { state.pointee = .noDataNow; return nil }
                 do {
-                    try input.read(into: inputBuffer, frameCount: min(count, inputBuffer.frameCapacity))
+                    let frames = AVAudioFrameCount(min(remaining, AVAudioFramePosition(min(count, inputBuffer.frameCapacity))))
+                    try input.read(into: inputBuffer, frameCount: frames)
                     if inputBuffer.frameLength == 0 {
                         eof = true
                         state.pointee = .endOfStream
