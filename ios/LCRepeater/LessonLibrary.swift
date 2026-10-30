@@ -51,13 +51,15 @@ final class LessonLibrary: ObservableObject {
     func entry(for id: UUID) -> LibraryEntry? { entries.first { $0.id == id } }
 
     func localStagingArea(for id: UUID) throws -> URL {
-        let folder = root.appendingPathComponent(".import-" + id.uuidString)
+        let folder = root.appendingPathComponent(".import-" + id.uuidString, isDirectory: true)
         try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
         return folder
     }
 
     func finishLocalLesson(_ lesson: Lesson, id: UUID, staging: URL) throws -> LibraryEntry {
-        guard staging.standardizedFileURL == root.appendingPathComponent(".import-" + id.uuidString).standardizedFileURL,
+        // URL equality includes the directory/trailing-slash hint; compare path
+        // components so the same folder stays valid before and after creation.
+        guard staging.standardizedFileURL.pathComponents == root.appendingPathComponent(".import-" + id.uuidString, isDirectory: true).standardizedFileURL.pathComponents,
               FileManager.default.fileExists(atPath: staging.appendingPathComponent("master.wav").path)
         else { throw LessonError.invalidAudio }
         try lesson.validate()

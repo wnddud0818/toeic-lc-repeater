@@ -141,7 +141,13 @@ struct AppHomeView: View {
             report["frames"] = Int(file.length)
             // Position saving must work while the start screen, not LibraryView, is mounted.
             player.load(entry, audioURL: library.audioURL(for: entry.id), savedSentence: 2)
-            try await Task.sleep(nanoseconds: 250_000_000)
+            if let error = player.error {
+                throw NSError(domain: "LocalSmokePlayback", code: 1, userInfo: [NSLocalizedDescriptionKey: error])
+            }
+            for _ in 0..<20 {
+                if library.savedSentence(for: entry.id) == 2 { break }
+                try await Task.sleep(nanoseconds: 100_000_000)
+            }
             report["saved_sentence"] = library.savedSentence(for: entry.id) ?? 0
             openLessonID = entry.id
             showingLibrary = true
