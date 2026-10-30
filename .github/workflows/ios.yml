@@ -85,7 +85,7 @@ jobs:
           import json, sys
           with open(sys.argv[1]) as source:
               result = json.load(source)
-          assert result == {'source': 'fixture', 'created': True, 'sentences': 2, 'sample_rate': 32000, 'channels': 1, 'frames': 64000}, result
+          assert result == {'source': 'fixture', 'created': True, 'sentences': 2, 'sample_rate': 32000, 'channels': 1, 'frames': 64000, 'saved_sentence': 2}, result
           print('Local audio conversion, segmentation, storage and playback fixture passed (no model inference)')
           PY
           cp "$LCR_APP_DATA/Documents/local-smoke-result.json" dist/ios-local-smoke-result.json

@@ -129,9 +129,6 @@ struct LibraryView: View {
         } message: {
             Text(library.error ?? player.error ?? "")
         }
-        .onChange(of: player.sentenceID) { _, value in
-            library.savePosition(lessonID: player.lessonID, sentenceID: value)
-        }
         .task {
             #if DEBUG
             if CommandLine.arguments.contains("--smoke-test") { await runImportSmokeTest(); return }

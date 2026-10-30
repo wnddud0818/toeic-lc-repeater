@@ -3,6 +3,7 @@ import AVFoundation
 
 struct AppHomeView: View {
     @EnvironmentObject private var library: LessonLibrary
+    @EnvironmentObject private var player: RepeaterPlayer
     @State private var showingLibrary = false
     @State private var showingDevice = false
     @State private var openLessonID: UUID?
@@ -75,6 +76,12 @@ struct AppHomeView: View {
                                           set: { if !$0 { library.error = nil } })) {
             Button("확인", role: .cancel) { library.error = nil }
         } message: { Text(library.error ?? "") }
+        .onChange(of: player.sentenceID) { _, value in
+            library.savePosition(lessonID: player.lessonID, sentenceID: value)
+        }
+        .onChange(of: player.lessonID) { _, value in
+            library.savePosition(lessonID: value, sentenceID: player.sentenceID)
+        }
         .task {
             #if DEBUG
             if CommandLine.arguments.contains("--smoke-test") { showingLibrary = true }
@@ -132,6 +139,10 @@ struct AppHomeView: View {
             report["sample_rate"] = Int(file.processingFormat.sampleRate)
             report["channels"] = Int(file.processingFormat.channelCount)
             report["frames"] = Int(file.length)
+            // Position saving must work while the start screen, not LibraryView, is mounted.
+            player.load(entry, audioURL: library.audioURL(for: entry.id), savedSentence: 2)
+            try await Task.sleep(nanoseconds: 250_000_000)
+            report["saved_sentence"] = library.savedSentence(for: entry.id) ?? 0
             openLessonID = entry.id
             showingLibrary = true
         } catch {
