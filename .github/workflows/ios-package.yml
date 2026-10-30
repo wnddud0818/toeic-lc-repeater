@@ -1,0 +1,25 @@
+name: Package iOS IPA only
+
+on:
+  workflow_dispatch:
+  push:
+    branches: ['codex/package-ios-*']
+
+permissions:
+  contents: read
+
+jobs:
+  package:
+    runs-on: macos-26
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build unsigned iPhone IPA
+        run: bash scripts/build_ios.sh
+      - uses: actions/upload-artifact@v4
+        with:
+          name: LC-Repeater-iOS-package
+          path: |
+            dist/LC-Repeater-unsigned.ipa
+            dist/LC-Repeater-unsigned.ipa.sha256
+          if-no-files-found: error
