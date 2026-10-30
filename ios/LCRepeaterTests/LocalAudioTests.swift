@@ -48,7 +48,10 @@ final class LocalAudioTests: XCTestCase {
         try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
         let fixture = try XCTUnwrap(Bundle.module.url(forResource: "tone", withExtension: "mp3", subdirectory: "Fixtures"))
         for name in ["토익 음원.mp3", "토익 음원.MP3", "일반 파일.bin"] {
-            let source = root.appendingPathComponent(name)
+            // macOS test volumes can be case-insensitive; isolate each case.
+            let sourceFolder = root.appendingPathComponent(UUID().uuidString)
+            try FileManager.default.createDirectory(at: sourceFolder, withIntermediateDirectories: true)
+            let source = sourceFolder.appendingPathComponent(name)
             try FileManager.default.copyItem(at: fixture, to: source)
             let folder = root.appendingPathComponent(UUID().uuidString)
             try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
