@@ -22,7 +22,9 @@ actor LocalAudioPreparer {
         NSFileCoordinator(filePresenter: nil).coordinate(readingItemAt: source, options: .withoutChanges,
                                                        error: &coordinationError) { url in
             do {
-                let size = try url.resourceValues(forKeys: [.fileSizeKey]).fileSize ?? 0
+                let values = try url.resourceValues(forKeys: [.fileSizeKey, .isRegularFileKey])
+                guard values.isRegularFile == true else { throw LocalLessonError.invalidAudio }
+                let size = values.fileSize ?? 0
                 guard size <= 1_073_741_824 else { throw LocalLessonError.audioTooLarge }
                 try FileManager.default.copyItem(at: url, to: copy)
             } catch { copyError = error }
@@ -30,7 +32,9 @@ actor LocalAudioPreparer {
         if let coordinationError { throw coordinationError }
         if let copyError { throw copyError }
         try Task.checkCancellation()
-        let input = try AVAudioFile(forReading: copy, commonFormat: .pcmFormatFloat32, interleaved: false)
+        let input: AVAudioFile
+        do { input = try AVAudioFile(forReading: copy, commonFormat: .pcmFormatFloat32, interleaved: false) }
+        catch { throw LocalLessonError.invalidAudio }
         guard input.length > 0, input.processingFormat.sampleRate > 0,
               let target = AVAudioFormat(commonFormat: .pcmFormatInt16, sampleRate: 32_000,
                                          channels: 1, interleaved: true),

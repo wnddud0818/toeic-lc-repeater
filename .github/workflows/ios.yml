@@ -94,6 +94,12 @@ jobs:
           xcrun simctl launch "$LCR_SIMULATOR" com.firstghrn.lcrepeater.ios --smoke-device-screen
           sleep 2
           xcrun simctl io "$LCR_SIMULATOR" screenshot dist/ios-local-availability-preview.png
+          xcrun simctl terminate "$LCR_SIMULATOR" com.firstghrn.lcrepeater.ios
+          cp ios/LCRepeaterTests/Fixtures/tone.mp3 "$LCR_APP_DATA/Documents/토익 회귀.mp3"
+          xcodebuild test -project ios/LCRepeater.xcodeproj -scheme LCRepeater \
+            -configuration Debug -destination "platform=iOS Simulator,id=$LCR_SIMULATOR" \
+            -derivedDataPath build/ios-simulator -resultBundlePath build/ios-picker-tests.xcresult \
+            -parallel-testing-enabled NO -only-testing:LCRepeaterUITests CODE_SIGNING_ALLOWED=NO
       - name: Upload IPA, checksum, and simulator preview
         if: ${{ !cancelled() && steps.ipa.outcome == 'success' }}
         uses: actions/upload-artifact@v4

@@ -1,6 +1,5 @@
 import SwiftUI
 import Translation
-import UniformTypeIdentifiers
 
 @available(iOS 26.0, *)
 struct LocalLessonView: View {
@@ -8,6 +7,7 @@ struct LocalLessonView: View {
     @Environment(\.dismiss) private var dismiss
     @StateObject private var processor = LocalLessonProcessor()
     @State private var showingPicker = false
+    @State private var pendingSourceURL: URL?
     @State private var checking = true
     @State private var availabilityError: String?
     @State private var configuration: TranslationSession.Configuration?
@@ -78,10 +78,18 @@ struct LocalLessonView: View {
             }
         }
         .interactiveDismissDisabled(processor.isBusy)
-        .fileImporter(isPresented: $showingPicker, allowedContentTypes: [.audio]) { result in
-            switch result {
-            case .success(let url): processor.select(url); start()
-            case .failure: break // Cancelling the system picker does not start a job.
+        .sheet(isPresented: $showingPicker, onDismiss: {
+            // Wait until the picker has left the screen before the translation
+            // session can present its own model-download UI.
+            if let url = pendingSourceURL {
+                pendingSourceURL = nil
+                processor.select(url)
+                start()
+            }
+        }) {
+            AudioFilePicker { url in
+                pendingSourceURL = url
+                showingPicker = false
             }
         }
         .translationTask(configuration) { session in
