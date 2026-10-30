@@ -1,6 +1,5 @@
 import SwiftUI
 import Translation
-import UniformTypeIdentifiers
 
 @available(iOS 26.0, *)
 struct LocalLessonView: View {
@@ -78,11 +77,13 @@ struct LocalLessonView: View {
             }
         }
         .interactiveDismissDisabled(processor.isBusy)
-        .fileImporter(isPresented: $showingPicker, allowedContentTypes: [.audio]) { result in
-            switch result {
-            case .success(let url): processor.select(url); start()
-            case .failure: break // Cancelling the system picker does not start a job.
-            }
+        .background {
+            AudioFilePicker(isPresented: $showingPicker) { url in
+                // The picker finishes dismissing before invoking this callback.
+                guard let url else { return }
+                processor.select(url)
+                start()
+            }.frame(width: 0, height: 0)
         }
         .translationTask(configuration) { session in
             if let id = await processor.run(session: session, library: library) {
