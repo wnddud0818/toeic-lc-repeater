@@ -7,7 +7,6 @@ struct LocalLessonView: View {
     @Environment(\.dismiss) private var dismiss
     @StateObject private var processor = LocalLessonProcessor()
     @State private var showingPicker = false
-    @State private var pendingSourceURL: URL?
     @State private var checking = true
     @State private var availabilityError: String?
     @State private var configuration: TranslationSession.Configuration?
@@ -78,19 +77,13 @@ struct LocalLessonView: View {
             }
         }
         .interactiveDismissDisabled(processor.isBusy)
-        .sheet(isPresented: $showingPicker, onDismiss: {
-            // Wait until the picker has left the screen before the translation
-            // session can present its own model-download UI.
-            if let url = pendingSourceURL {
-                pendingSourceURL = nil
+        .background {
+            AudioFilePicker(isPresented: $showingPicker) { url in
+                // The picker finishes dismissing before invoking this callback.
+                guard let url else { return }
                 processor.select(url)
                 start()
-            }
-        }) {
-            AudioFilePicker { url in
-                pendingSourceURL = url
-                showingPicker = false
-            }
+            }.frame(width: 0, height: 0)
         }
         .translationTask(configuration) { session in
             if let id = await processor.run(session: session, library: library) {

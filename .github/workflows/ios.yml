@@ -96,10 +96,22 @@ jobs:
           xcrun simctl io "$LCR_SIMULATOR" screenshot dist/ios-local-availability-preview.png
           xcrun simctl terminate "$LCR_SIMULATOR" com.firstghrn.lcrepeater.ios
           cp ios/LCRepeaterTests/Fixtures/tone.mp3 "$LCR_APP_DATA/Documents/토익 회귀.mp3"
+          printf 'LCR_SIMULATOR=%s\n' "$LCR_SIMULATOR" >> "$GITHUB_ENV"
+      - name: Test real system MP3 selection and cancellation
+        id: picker
+        shell: bash
+        run: |
           xcodebuild test -project ios/LCRepeater.xcodeproj -scheme LCRepeater \
             -configuration Debug -destination "platform=iOS Simulator,id=$LCR_SIMULATOR" \
             -derivedDataPath build/ios-simulator -resultBundlePath build/ios-picker-tests.xcresult \
             -parallel-testing-enabled NO -only-testing:LCRepeaterUITests CODE_SIGNING_ALLOWED=NO
+      - name: Upload picker test diagnostics on failure
+        if: ${{ failure() && steps.picker.outcome == 'failure' }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: iOS-picker-test-diagnostics
+          path: build/ios-picker-tests.xcresult
+          if-no-files-found: ignore
       - name: Upload IPA, checksum, and simulator preview
         if: ${{ !cancelled() && steps.ipa.outcome == 'success' }}
         uses: actions/upload-artifact@v4
