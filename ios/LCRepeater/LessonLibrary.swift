@@ -50,6 +50,24 @@ final class LessonLibrary: ObservableObject {
 
     func entry(for id: UUID) -> LibraryEntry? { entries.first { $0.id == id } }
 
+    func localStagingArea(for id: UUID) throws -> URL {
+        let folder = root.appendingPathComponent(".import-" + id.uuidString)
+        try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+        return folder
+    }
+
+    func finishLocalLesson(_ lesson: Lesson, id: UUID, staging: URL) throws -> LibraryEntry {
+        guard staging.standardizedFileURL == root.appendingPathComponent(".import-" + id.uuidString).standardizedFileURL,
+              FileManager.default.fileExists(atPath: staging.appendingPathComponent("master.wav").path)
+        else { throw LessonError.invalidAudio }
+        try lesson.validate()
+        let entry = LibraryEntry(id: id, importedAt: Date(), lesson: lesson)
+        try JSONEncoder().encode(entry).write(to: staging.appendingPathComponent("entry.json"), options: .atomic)
+        try FileManager.default.moveItem(at: staging, to: root.appendingPathComponent(id.uuidString))
+        entries.insert(entry, at: 0)
+        return entry
+    }
+
     func importArchive(at url: URL) async {
         guard !isImporting else {
             error = "다른 레슨을 가져오는 중이에요. 완료 후 다시 열어 주세요."

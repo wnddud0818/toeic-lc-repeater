@@ -7,6 +7,8 @@ struct LibraryView: View {
     @State private var showingImporter = false
     @State private var showingHelp = false
     @State private var navigationPath: [UUID] = []
+    var openLessonID: UUID? = nil
+    var onStart: (() -> Void)? = nil
 
     var body: some View {
         NavigationStack(path: $navigationPath) {
@@ -53,7 +55,7 @@ struct LibraryView: View {
                         } header: {
                             Text("내 레슨")
                         } footer: {
-                            Text("원본 레슨 파일은 iCloud Drive나 PC에 보관해 주세요.")
+                            Text("원본 음원과 PC 레슨 파일은 iCloud Drive나 PC에도 보관해 주세요.")
                         }
                     }
                 }
@@ -68,7 +70,10 @@ struct LibraryView: View {
             }
             .toolbar {
                 ToolbarItem(placement: .topBarLeading) {
-                    Button("옮기는 방법", systemImage: "questionmark.circle") { showingHelp = true }
+                    HStack {
+                        if let onStart { Button("시작 화면", systemImage: "house") { onStart() } }
+                        Button("옮기는 방법", systemImage: "questionmark.circle") { showingHelp = true }
+                    }
                 }
                 ToolbarItem(placement: .topBarTrailing) {
                     Button("가져오기", systemImage: "plus") { showingImporter = true }
@@ -129,8 +134,9 @@ struct LibraryView: View {
         }
         .task {
             #if DEBUG
-            if CommandLine.arguments.contains("--smoke-test") { await runImportSmokeTest() }
+            if CommandLine.arguments.contains("--smoke-test") { await runImportSmokeTest(); return }
             #endif
+            if let openLessonID { navigationPath = [openLessonID] }
         }
     }
 
