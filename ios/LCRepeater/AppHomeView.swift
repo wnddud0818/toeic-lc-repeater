@@ -134,7 +134,10 @@ struct AppHomeView: View {
             report["frames"] = Int(file.length)
             openLessonID = entry.id
             showingLibrary = true
-        } catch { report["error"] = error.localizedDescription }
+        } catch {
+            report["error"] = error.localizedDescription
+            report["diagnostic"] = String(reflecting: error)
+        }
         if let staging { try? FileManager.default.removeItem(at: staging) }
         try? await Task.sleep(nanoseconds: 1_000_000_000)
         if let data = try? JSONSerialization.data(withJSONObject: report) {

@@ -31,8 +31,8 @@ actor LocalAudioPreparer {
         try Task.checkCancellation()
         let input = try AVAudioFile(forReading: copy, commonFormat: .pcmFormatFloat32, interleaved: false)
         guard input.length > 0, input.processingFormat.sampleRate > 0,
-              let target = AVAudioFormat(commonFormat: .pcmFormatFloat32, sampleRate: 32_000,
-                                         channels: 1, interleaved: false),
+              let target = AVAudioFormat(commonFormat: .pcmFormatInt16, sampleRate: 32_000,
+                                         channels: 1, interleaved: true),
               let converter = AVAudioConverter(from: input.processingFormat, to: target),
               let inputBuffer = AVAudioPCMBuffer(pcmFormat: input.processingFormat, frameCapacity: 16_384),
               let outputBuffer = AVAudioPCMBuffer(pcmFormat: target, frameCapacity: 8_192)
@@ -40,14 +40,12 @@ actor LocalAudioPreparer {
         let duration = Double(input.length) / input.processingFormat.sampleRate
         guard duration.isFinite, duration > 0 else { throw LocalLessonError.invalidAudio }
         guard duration * 64_000 + 4_096 <= Double(2 * 1_024 * 1_024 * 1_024) else { throw LocalLessonError.audioTooLarge }
-        converter.downmix = true
+        if input.processingFormat.channelCount > 1 { converter.downmix = true }
         let destination = folder.appendingPathComponent("master.wav")
-        let settings: [String: Any] = [AVFormatIDKey: kAudioFormatLinearPCM,
-            AVSampleRateKey: 32_000, AVNumberOfChannelsKey: 1, AVLinearPCMBitDepthKey: 16,
-            AVLinearPCMIsFloatKey: false, AVLinearPCMIsBigEndianKey: false]
-        // Let AVAudioFile encode Float32 processing buffers into PCM16 on disk.
-        var output: AVAudioFile? = try AVAudioFile(forWriting: destination, settings: settings,
-                                                  commonFormat: .pcmFormatFloat32, interleaved: false)
+        // Write buffers in exactly the file's PCM16/interleaved format. No second
+        // implicit conversion inside AVAudioFile is needed.
+        var output: AVAudioFile? = try AVAudioFile(forWriting: destination, settings: target.settings,
+                                                  commonFormat: .pcmFormatInt16, interleaved: true)
         var readError: Error?
         var eof = false
         var lastProgress = -1

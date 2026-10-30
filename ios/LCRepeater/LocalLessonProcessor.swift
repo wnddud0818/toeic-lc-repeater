@@ -143,6 +143,8 @@ final class LocalLessonProcessor: ObservableObject {
     }
 
     func cancel() {
+        status = "취소하는 중이에요"
+        progress = nil
         job?.cancel()
         activeSession?.cancel()
     }
