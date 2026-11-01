@@ -6,6 +6,35 @@ struct PreparedLocalAudio: Sendable {
     let duration: Double
 }
 
+/// Keep a shared/open-in audio file available while the model-support checks
+/// and download prompts run. The caller holds security-scoped access.
+actor IncomingAudioFile {
+    func copy(source: URL) throws -> URL {
+        let folder = FileManager.default.temporaryDirectory
+            .appendingPathComponent("LC-Repeater-Incoming", isDirectory: true)
+            .appendingPathComponent(UUID().uuidString, isDirectory: true)
+        try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+        var copied = false
+        defer { if !copied { try? FileManager.default.removeItem(at: folder) } }
+        let destination = folder.appendingPathComponent(source.lastPathComponent)
+        var coordinationError: NSError?
+        var copyError: Error?
+        NSFileCoordinator(filePresenter: nil).coordinate(readingItemAt: source, options: .withoutChanges,
+                                                       error: &coordinationError) { url in
+            do {
+                let values = try url.resourceValues(forKeys: [.fileSizeKey, .isRegularFileKey])
+                guard values.isRegularFile == true else { throw LocalLessonError.invalidAudio }
+                guard (values.fileSize ?? 0) <= 1_073_741_824 else { throw LocalLessonError.audioTooLarge }
+                try FileManager.default.copyItem(at: url, to: destination)
+            } catch { copyError = error }
+        }
+        if let coordinationError { throw coordinationError }
+        if let copyError { throw copyError }
+        copied = true
+        return destination
+    }
+}
+
 actor LocalAudioPreparer {
     /// Copy provider-backed files while access is held, then stream to the existing lesson format.
     func prepare(source: URL, folder: URL,

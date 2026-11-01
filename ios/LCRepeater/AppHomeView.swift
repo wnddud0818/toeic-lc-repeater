@@ -1,5 +1,6 @@
 import SwiftUI
 import AVFoundation
+import UniformTypeIdentifiers
 
 struct AppHomeView: View {
     @EnvironmentObject private var library: LessonLibrary
@@ -7,6 +8,11 @@ struct AppHomeView: View {
     @State private var showingLibrary = false
     @State private var showingDevice = false
     @State private var openLessonID: UUID?
+    @State private var incomingAudio: URL?
+    @State private var incomingError: String?
+    @State private var incomingCopies: [URL] = []
+    @State private var copyingAudio = false
+    @State private var deviceBusy = false
 
     var body: some View {
         Group {
@@ -48,9 +54,15 @@ struct AppHomeView: View {
                 }
             }
         }
-        .sheet(isPresented: $showingDevice) {
+        .sheet(isPresented: $showingDevice, onDismiss: {
+            incomingAudio = nil
+            deviceBusy = false
+            for url in incomingCopies { try? FileManager.default.removeItem(at: url.deletingLastPathComponent()) }
+            incomingCopies = []
+        }) {
             if #available(iOS 26.0, *) {
-                LocalLessonView { id in
+                LocalLessonView(incomingAudio: $incomingAudio, incomingError: $incomingError,
+                                onBusyChange: { deviceBusy = $0 }) { id in
                     openLessonID = id
                     showingDevice = false
                     showingLibrary = true
@@ -65,17 +77,28 @@ struct AppHomeView: View {
         }
         .onOpenURL { url in
             guard url.isFileURL else { return }
+            if url.pathExtension.lowercased() != "lcrlesson" {
+                openIncomingAudio(url)
+                return
+            }
             guard !showingDevice else {
-                library.error = "기기에서 만들기 화면을 닫은 뒤 레슨 파일을 다시 열어 주세요."
+                incomingError = "기기에서 만들기 화면을 닫은 뒤 레슨 파일을 다시 열어 주세요."
                 return
             }
             showingLibrary = true
             Task { await library.importArchive(at: url) }
         }
-        .alert("알림", isPresented: Binding(get: { !showingLibrary && !showingDevice && library.error != nil },
-                                          set: { if !$0 { library.error = nil } })) {
-            Button("확인", role: .cancel) { library.error = nil }
-        } message: { Text(library.error ?? "") }
+        .overlay {
+            if copyingAudio {
+                ProgressView("음원을 가져오는 중이에요")
+                    .padding(24).background(.regularMaterial, in: RoundedRectangle(cornerRadius: 18))
+            }
+        }
+        .alert("알림", isPresented: Binding(get: {
+            !showingDevice && (incomingError != nil || (!showingLibrary && library.error != nil))
+        }, set: { if !$0 { incomingError = nil; library.error = nil } })) {
+            Button("확인", role: .cancel) { incomingError = nil; library.error = nil }
+        } message: { Text(incomingError ?? library.error ?? "") }
         .onChange(of: player.sentenceID) { _, value in
             library.savePosition(lessonID: player.lessonID, sentenceID: value)
         }
@@ -88,6 +111,34 @@ struct AppHomeView: View {
             if CommandLine.arguments.contains("--smoke-device-screen") { showingDevice = true }
             if CommandLine.arguments.contains("--smoke-local-test") { await runLocalFixtureSmokeTest() }
             #endif
+        }
+    }
+
+    private func openIncomingAudio(_ url: URL) {
+        guard UTType(filenameExtension: url.pathExtension)?.conforms(to: .audio) == true else {
+            incomingError = "MP3, M4A, WAV 등의 음원이나 .lcrlesson 파일을 열어 주세요."
+            return
+        }
+        guard !deviceBusy, !copyingAudio else {
+            incomingError = "현재 음원을 처리하고 있어요. 작업을 완료하거나 취소한 뒤 다시 열어 주세요."
+            return
+        }
+        guard #available(iOS 26.0, *) else { showingDevice = true; return }
+        // Start external access in the URL callback, and hold it until the
+        // provider-coordinated copy finishes. Model preparation can happen later.
+        let accessed = url.startAccessingSecurityScopedResource()
+        copyingAudio = true
+        Task {
+            defer {
+                if accessed { url.stopAccessingSecurityScopedResource() }
+                copyingAudio = false
+            }
+            do {
+                let copy = try await IncomingAudioFile().copy(source: url)
+                incomingCopies.append(copy)
+                incomingAudio = copy
+                showingDevice = true
+            } catch { incomingError = error.localizedDescription }
         }
     }
 

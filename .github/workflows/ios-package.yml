@@ -6,7 +6,7 @@ on:
     branches: ['codex/package-ios-*']
 
 permissions:
-  contents: read
+  contents: write
 
 jobs:
   package:
@@ -23,3 +23,20 @@ jobs:
             dist/LC-Repeater-unsigned.ipa
             dist/LC-Repeater-unsigned.ipa.sha256
           if-no-files-found: error
+      - name: Publish iOS 0.3.2
+        if: github.ref_name == 'codex/package-ios-open-audio'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          source = Path('dist/LC-Repeater-unsigned.ipa')
+          digest = source.with_suffix('.ipa.sha256').read_text().split()[0]
+          destination = source.with_name('LC-Repeater-0.3.2-unsigned.ipa')
+          source.rename(destination)
+          destination.with_suffix('.ipa.sha256').write_text(digest + '  ' + destination.name + '\n')
+          PY
+          gh release create ios-v0.3.2 --repo "$GITHUB_REPOSITORY" \
+            --target "$GITHUB_SHA" --title "iOS 0.3.2" --latest \
+            --notes-file docs/ios-0.3.2-release.md \
+            dist/LC-Repeater-0.3.2-unsigned.ipa dist/LC-Repeater-0.3.2-unsigned.ipa.sha256

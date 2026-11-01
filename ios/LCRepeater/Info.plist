@@ -8,8 +8,8 @@
     <key>CFBundleInfoDictionaryVersion</key><string>6.0</string>
     <key>CFBundleName</key><string>$(PRODUCT_NAME)</string>
     <key>CFBundlePackageType</key><string>APPL</string>
-    <key>CFBundleShortVersionString</key><string>0.3.1</string>
-    <key>CFBundleVersion</key><string>4</string>
+    <key>CFBundleShortVersionString</key><string>0.3.2</string>
+    <key>CFBundleVersion</key><string>5</string>
     <key>LSRequiresIPhoneOS</key><true/>
     <key>UILaunchScreen</key><dict/>
     <key>UISupportedInterfaceOrientations</key><array>
@@ -29,6 +29,16 @@
         <key>CFBundleTypeRole</key><string>Viewer</string>
         <key>LSHandlerRank</key><string>Owner</string>
         <key>LSItemContentTypes</key><array><string>com.firstghrn.lcrepeater.lesson</string></array>
+    </dict><dict>
+        <key>CFBundleTypeName</key><string>Audio</string>
+        <key>CFBundleTypeRole</key><string>Viewer</string>
+        <key>LSHandlerRank</key><string>Alternate</string>
+        <key>LSItemContentTypes</key><array>
+            <string>public.audio</string>
+            <string>public.mp3</string>
+            <string>public.mpeg-4-audio</string>
+            <string>com.microsoft.waveform-audio</string>
+        </array>
     </dict></array>
     <key>UTExportedTypeDeclarations</key><array><dict>
         <key>UTTypeIdentifier</key><string>com.firstghrn.lcrepeater.lesson</string>
