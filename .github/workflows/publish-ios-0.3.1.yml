@@ -1,0 +1,56 @@
+name: Publish iOS 0.3.1 IPA
+
+on:
+  push:
+    branches: ['codex/publish-ios-0.3.1']
+
+permissions:
+  contents: write
+  actions: read
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Download the IPA already delivered to the user
+        run: gh run download 41021423295 --repo "$GITHUB_REPOSITORY" --name LC-Repeater-iOS-package --dir dist
+      - name: Prepare release assets
+        run: |
+          python3 - <<'PY'
+          import hashlib, io, plistlib
+          from pathlib import Path
+          from zipfile import ZipFile
+          source = Path('dist/LC-Repeater-unsigned.ipa')
+          data = source.read_bytes()
+          digest = hashlib.sha256(data).hexdigest()
+          assert digest == '063c201ec93067bc02e7550d8e514bbcb21298159027ac9d3a64a4bd8042d1bb'
+          with ZipFile(io.BytesIO(data)) as ipa:
+              info = plistlib.loads(ipa.read('Payload/LCRepeater.app/Info.plist'))
+          assert info['CFBundleShortVersionString'] == '0.3.1'
+          assert info['CFBundleVersion'] == '4'
+          destination = source.with_name('LC-Repeater-0.3.1-unsigned.ipa')
+          source.rename(destination)
+          destination.with_suffix('.ipa.sha256').write_text(digest + '  ' + destination.name + '\n')
+          Path('release-notes.md').write_text(
+              '아이폰용 LC Repeater 0.3.1 (빌드 4)\n\n'
+              '- 기기에서 시작하기의 MP3 파일 선택 처리를 UIKit 문서 선택기로 변경했습니다.\n'
+              '- 선택창이 닫힌 뒤 음원 준비와 전사·번역을 시작하도록 조정했습니다.\n'
+              '- Apple Intelligence 없이 애플의 기기 내 전사·번역 모델을 사용합니다.\n\n'
+              '이미 전달한 IPA와 동일한 파일입니다. 추가 실기기 검증은 사용자 요청에 따라 생략했습니다.\n\n'
+              '설치: unsigned IPA이므로 Feather에서 개인 서명 후 기존 앱에 업데이트 설치합니다.\n'
+              '기기에서 전사·번역은 iOS 26 이상 및 SpeechTranscriber 지원 기기가 필요합니다.\n'
+          )
+          PY
+      - name: Publish IPA and checksum
+        run: |
+          gh release create ios-v0.3.1 \
+            --repo "$GITHUB_REPOSITORY" \
+            --target 0e2221efc8606bc8c936fdc97bdf4aab3044f370 \
+            --title "iOS 0.3.1" --latest \
+            --notes-file release-notes.md \
+            dist/LC-Repeater-0.3.1-unsigned.ipa \
+            dist/LC-Repeater-0.3.1-unsigned.ipa.sha256
