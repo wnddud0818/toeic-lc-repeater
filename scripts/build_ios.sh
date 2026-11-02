@@ -10,6 +10,12 @@ import sys
 if tuple(map(int, sys.argv[1].split('.')[:2])) < (26, 4):
     raise SystemExit('기기 내 일반 번역 모델을 선택하려면 Xcode/iOS SDK 26.4 이상이 필요합니다.')
 PY
+python3 - "$LCR_IOS_SDK" <<'PY'
+import sys
+if tuple(map(int, sys.argv[1].split('.')[:2])) < (27, 1):
+    print('경고: iPhone Duo 펼친 화면을 꽉 채우려면 Xcode 27.1(iOS SDK 27.1) 이상으로 빌드하세요. '
+          '이 SDK로 만든 앱은 안쪽 화면 가운데에 작게 표시됩니다.', file=sys.stderr)
+PY
 python3 scripts/generate_ios_project.py --check
 LCR_BUNDLE_ID="${LCR_BUNDLE_ID:-com.firstghrn.lcrepeater.ios}"
 mkdir -p dist

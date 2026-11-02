@@ -6,12 +6,14 @@ struct LibraryView: View {
     @EnvironmentObject private var player: RepeaterPlayer
     @State private var showingImporter = false
     @State private var showingHelp = false
-    @State private var navigationPath: [UUID] = []
+    /// Selected lesson. On iPhone Duo's inner display (and iPad) the list and player sit side by side;
+    /// on the outer display and other iPhones the split view collapses into a single push stack.
+    @State private var selectedLessonID: UUID?
     var openLessonID: UUID? = nil
     var onStart: (() -> Void)? = nil
 
     var body: some View {
-        NavigationStack(path: $navigationPath) {
+        NavigationSplitView {
             Group {
                 if library.entries.isEmpty {
                     ContentUnavailableView {
@@ -27,7 +29,7 @@ struct LibraryView: View {
                         Button("레슨 옮기는 방법") { showingHelp = true }
                     }
                 } else {
-                    List {
+                    List(selection: $selectedLessonID) {
                         Section {
                             ForEach(library.entries) { entry in
                                 NavigationLink(value: entry.id) {
@@ -49,6 +51,7 @@ struct LibraryView: View {
                                 let ids = offsets.map { library.entries[$0].id }
                                 for id in ids {
                                     if player.lessonID == id { player.unload() }
+                                    if selectedLessonID == id { selectedLessonID = nil }
                                     library.delete(id)
                                 }
                             }
@@ -61,13 +64,7 @@ struct LibraryView: View {
                 }
             }
             .navigationTitle("LC Repeater")
-            .navigationDestination(for: UUID.self) { id in
-                if let entry = library.entry(for: id) {
-                    PlayerView(entry: entry)
-                } else {
-                    ContentUnavailableView("레슨이 없어요", systemImage: "doc.questionmark")
-                }
-            }
+            .navigationSplitViewColumnWidth(min: 300, ideal: 360, max: 440)
             .toolbar {
                 ToolbarItem(placement: .topBarLeading) {
                     HStack {
@@ -81,9 +78,10 @@ struct LibraryView: View {
                 }
             }
             .safeAreaInset(edge: .bottom) {
-                if let id = player.lessonID, library.entry(for: id) != nil {
+                // Hidden while that lesson is already on screen in the detail column.
+                if let id = player.lessonID, id != selectedLessonID, library.entry(for: id) != nil {
                     HStack(spacing: 16) {
-                        NavigationLink(value: id) {
+                        Button { selectedLessonID = id } label: {
                             VStack(alignment: .leading, spacing: 3) {
                                 Text(player.lesson?.title ?? "").font(.caption).foregroundStyle(.secondary)
                                 Text(player.currentSentence?.en ?? "레슨 열기").font(.subheadline).lineLimit(1)
@@ -100,7 +98,20 @@ struct LibraryView: View {
                     .background(.regularMaterial)
                 }
             }
+        } detail: {
+            NavigationStack {
+                if let id = selectedLessonID, let entry = library.entry(for: id) {
+                    // A new identity per lesson so switching lessons side by side reloads the player.
+                    PlayerView(entry: entry).id(id)
+                } else if selectedLessonID != nil {
+                    ContentUnavailableView("레슨이 없어요", systemImage: "doc.questionmark")
+                } else {
+                    ContentUnavailableView("레슨을 선택하세요", systemImage: "headphones",
+                                           description: Text("왼쪽 목록에서 레슨을 고르면 여기서 반복해 들을 수 있어요."))
+                }
+            }
         }
+        .navigationSplitViewStyle(.balanced)
         .fileImporter(isPresented: $showingImporter, allowedContentTypes: [.lcrLesson], allowsMultipleSelection: true) { result in
             switch result {
             case .success(let urls):
@@ -133,7 +144,7 @@ struct LibraryView: View {
             #if DEBUG
             if CommandLine.arguments.contains("--smoke-test") { await runImportSmokeTest(); return }
             #endif
-            if let openLessonID { navigationPath = [openLessonID] }
+            if let openLessonID { selectedLessonID = openLessonID }
         }
     }
 
@@ -144,7 +155,7 @@ struct LibraryView: View {
         await library.importArchive(at: documents.appendingPathComponent("contract.lcrlesson"))
         if let entry = library.entries.first {
             player.load(entry, audioURL: library.audioURL(for: entry.id), savedSentence: 2)
-            navigationPath = [entry.id]
+            selectedLessonID = entry.id
         }
         try? await Task.sleep(nanoseconds: 1_000_000_000)
         let result: [String: Any] = [

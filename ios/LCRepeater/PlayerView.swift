@@ -7,83 +7,36 @@ struct PlayerView: View {
     @State private var showingSentences = false
     @State private var trimming: Sentence?
 
+    @State private var contentWidth: CGFloat = 0
+    /// Lay out by the space actually available, never by device, idiom or orientation: iPhone Duo's
+    /// inner display, iPad and Split View all resize this view live as the device folds or unfolds.
+    private var sideBySide: Bool { contentWidth >= 720 }
+
     var body: some View {
         ScrollView {
-            VStack(spacing: 22) {
+            Group {
                 if let sentence = player.currentSentence, player.lessonID == entry.id {
-                    SentenceCard(sentence: sentence, position: player.position,
-                                 count: player.visibleSentences.count)
-                        .id("\(entry.id.uuidString):\(sentence.i)")
-
-                    VStack(spacing: 10) {
-                        HStack(alignment: .firstTextBaseline) {
-                            Text("\(player.repetition)").font(.system(.largeTitle, design: .rounded).bold())
-                            Text("/ \(player.settings.repetitions == 0 ? "∞" : String(player.settings.repetitions))회")
-                                .foregroundStyle(.secondary)
-                            Spacer()
-                            Text(player.phase).font(.caption).foregroundStyle(.secondary)
-                                .multilineTextAlignment(.trailing)
+                    if sideBySide {
+                        HStack(alignment: .top, spacing: 28) {
+                            VStack(spacing: 22) { listening(sentence) }.frame(maxWidth: .infinity)
+                            VStack(spacing: 22) { practice(sentence) }.frame(width: 340)
                         }
-                        ProgressView(value: player.progress).accessibilityLabel("현재 문장 재생 진행률")
-                    }
-
-                    HStack(spacing: 22) {
-                        control("처음부터", symbol: "arrow.counterclockwise") { player.play(sentenceID: sentence.i) }
-                        control("이전 문장", symbol: "backward.end.fill", disabled: player.position == 0) { player.move(-1) }
-                        Button { player.toggle() } label: {
-                            Image(systemName: player.isPlaying ? "pause.fill" : "play.fill")
-                                .font(.title).frame(width: 64, height: 64)
+                        .frame(maxWidth: 1100)
+                    } else {
+                        VStack(spacing: 22) {
+                            listening(sentence)
+                            practice(sentence)
                         }
-                        .buttonStyle(.borderedProminent).buttonBorderShape(.circle)
-                        .accessibilityLabel(player.isPlaying ? "일시정지" : "재생")
-                        control("다음 문장", symbol: "forward.end.fill",
-                                disabled: player.position + 1 >= player.visibleSentences.count) { player.move(1) }
-                    }
-
-                    GroupBox {
-                        VStack(spacing: 8) {
-                            settingRow("반복 횟수") {
-                                Picker("반복 횟수", selection: $player.settings.repetitions) {
-                                    ForEach([1, 3, 5, 10, 15, 20, 30, 50, 100], id: \.self) { Text("\($0)회").tag($0) }
-                                    Text("무한").tag(0)
-                                }
-                            }
-                            settingRow("반복 사이 쉼") {
-                                Picker("반복 사이 쉼", selection: $player.settings.gap) {
-                                    Text("없음").tag(0.0)
-                                    ForEach([0.3, 0.6, 1.0, 1.5, 2.0, 3.0], id: \.self) {
-                                        Text("\($0, specifier: "%g")초").tag($0)
-                                    }
-                                    Text("문장 길이만큼").tag(-1.0)
-                                }
-                            }
-                            settingRow("속도") {
-                                Picker("속도", selection: $player.settings.speed) {
-                                    ForEach([0.7, 0.8, 0.9, 1.0, 1.1, 1.2, 1.3], id: \.self) {
-                                        Text("\($0, specifier: "%.1f")×").tag($0)
-                                    }
-                                }
-                            }
-                            Divider()
-                            Toggle("다 들으면 다음 문장으로", isOn: $player.settings.advance)
-                            Toggle("시험 안내 문장 건너뛰기", isOn: $player.settings.hideDirections)
-                        }
-                        .font(.subheadline)
-                    }
-
-                    HStack {
-                        Text("\(clock(sentence.start)) – \(clock(sentence.end))").monospacedDigit()
-                            .font(.caption).foregroundStyle(.secondary)
-                        Spacer()
-                        Button("구간 조절", systemImage: "slider.horizontal.3") { trimming = sentence }
-                            .font(.subheadline)
+                        .frame(maxWidth: 640)
                     }
                 } else {
                     ProgressView().padding(50)
                 }
             }
             .padding(20)
+            .frame(maxWidth: .infinity)
         }
+        .onGeometryChange(for: CGFloat.self) { $0.size.width } action: { contentWidth = $0 }
         .background(Color(.systemGroupedBackground))
         .navigationTitle(entry.lesson.title).navigationBarTitleDisplayMode(.inline)
         .toolbar {
@@ -124,6 +77,80 @@ struct PlayerView: View {
             TrimView(sentence: sentence, lessonDuration: entry.lesson.duration) { start, end in
                 try library.updateRange(in: entry.id, sentenceID: sentence.i, start: start, end: end)
             }
+        }
+    }
+
+    @ViewBuilder
+    private func listening(_ sentence: Sentence) -> some View {
+        SentenceCard(sentence: sentence, position: player.position,
+                     count: player.visibleSentences.count)
+            .id("\(entry.id.uuidString):\(sentence.i)")
+
+        VStack(spacing: 10) {
+            HStack(alignment: .firstTextBaseline) {
+                Text("\(player.repetition)").font(.system(.largeTitle, design: .rounded).bold())
+                Text("/ \(player.settings.repetitions == 0 ? "∞" : String(player.settings.repetitions))회")
+                    .foregroundStyle(.secondary)
+                Spacer()
+                Text(player.phase).font(.caption).foregroundStyle(.secondary)
+                    .multilineTextAlignment(.trailing)
+            }
+            ProgressView(value: player.progress).accessibilityLabel("현재 문장 재생 진행률")
+        }
+
+        HStack(spacing: 22) {
+            control("처음부터", symbol: "arrow.counterclockwise") { player.play(sentenceID: sentence.i) }
+            control("이전 문장", symbol: "backward.end.fill", disabled: player.position == 0) { player.move(-1) }
+            Button { player.toggle() } label: {
+                Image(systemName: player.isPlaying ? "pause.fill" : "play.fill")
+                    .font(.title).frame(width: 64, height: 64)
+            }
+            .buttonStyle(.borderedProminent).buttonBorderShape(.circle)
+            .accessibilityLabel(player.isPlaying ? "일시정지" : "재생")
+            control("다음 문장", symbol: "forward.end.fill",
+                    disabled: player.position + 1 >= player.visibleSentences.count) { player.move(1) }
+        }
+    }
+
+    @ViewBuilder
+    private func practice(_ sentence: Sentence) -> some View {
+        GroupBox {
+            VStack(spacing: 8) {
+                settingRow("반복 횟수") {
+                    Picker("반복 횟수", selection: $player.settings.repetitions) {
+                        ForEach([1, 3, 5, 10, 15, 20, 30, 50, 100], id: \.self) { Text("\($0)회").tag($0) }
+                        Text("무한").tag(0)
+                    }
+                }
+                settingRow("반복 사이 쉼") {
+                    Picker("반복 사이 쉼", selection: $player.settings.gap) {
+                        Text("없음").tag(0.0)
+                        ForEach([0.3, 0.6, 1.0, 1.5, 2.0, 3.0], id: \.self) {
+                            Text("\($0, specifier: "%g")초").tag($0)
+                        }
+                        Text("문장 길이만큼").tag(-1.0)
+                    }
+                }
+                settingRow("속도") {
+                    Picker("속도", selection: $player.settings.speed) {
+                        ForEach([0.7, 0.8, 0.9, 1.0, 1.1, 1.2, 1.3], id: \.self) {
+                            Text("\($0, specifier: "%.1f")×").tag($0)
+                        }
+                    }
+                }
+                Divider()
+                Toggle("다 들으면 다음 문장으로", isOn: $player.settings.advance)
+                Toggle("시험 안내 문장 건너뛰기", isOn: $player.settings.hideDirections)
+            }
+            .font(.subheadline)
+        }
+
+        HStack {
+            Text("\(clock(sentence.start)) – \(clock(sentence.end))").monospacedDigit()
+                .font(.caption).foregroundStyle(.secondary)
+            Spacer()
+            Button("구간 조절", systemImage: "slider.horizontal.3") { trimming = sentence }
+                .font(.subheadline)
         }
     }
 
