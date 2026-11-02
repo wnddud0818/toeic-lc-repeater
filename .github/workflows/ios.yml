@@ -77,6 +77,33 @@ jobs:
             dist/LC-Repeater-unsigned.ipa
             dist/LC-Repeater-unsigned.ipa.sha256
           if-no-files-found: error
+      - name: Prepare versioned iOS release assets
+        id: release_metadata
+        if: github.ref == 'refs/heads/main' && (github.event_name == 'push' || github.event_name == 'workflow_dispatch')
+        shell: bash
+        run: |
+          python3 - <<'PY'
+          import hashlib, os, plistlib, re, shutil, zipfile
+          from pathlib import Path
+          source = Path('dist/LC-Repeater-unsigned.ipa')
+          with zipfile.ZipFile(source) as ipa:
+              info = plistlib.loads(ipa.read('Payload/LCRepeater.app/Info.plist'))
+          version = info['CFBundleShortVersionString']
+          build = info['CFBundleVersion']
+          for value in (version, build):
+              if not re.fullmatch(r'[0-9]+(?:\.[0-9]+)*', value):
+                  raise SystemExit('Invalid iOS version/build metadata')
+          destination = source.with_name(f'LC-Repeater-{version}-build{build}-unsigned.ipa')
+          shutil.copyfile(source, destination)
+          checksum = destination.with_suffix('.ipa.sha256')
+          digest = hashlib.sha256()
+          with destination.open('rb') as audio:
+              for chunk in iter(lambda: audio.read(1 << 20), b''):
+                  digest.update(chunk)
+          checksum.write_text(f'{digest.hexdigest()}  {destination.name}\n')
+          with open(os.environ['GITHUB_OUTPUT'], 'a') as output:
+              output.write(f'version={version}\nbuild={build}\nipa={destination}\nchecksum={checksum}\n')
+          PY
       - name: Publish iOS IPA to GitHub Releases
         if: github.ref == 'refs/heads/main' && (github.event_name == 'push' || github.event_name == 'workflow_dispatch')
         shell: bash
@@ -84,33 +111,43 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           LCR_XCODE_VERSION: ${{ steps.toolchain.outputs.xcode_version }}
           LCR_IOS_SDK: ${{ steps.toolchain.outputs.sdk_version }}
+          LCR_APP_VERSION: ${{ steps.release_metadata.outputs.version }}
+          LCR_APP_BUILD: ${{ steps.release_metadata.outputs.build }}
+          LCR_RELEASE_IPA: ${{ steps.release_metadata.outputs.ipa }}
+          LCR_RELEASE_CHECKSUM: ${{ steps.release_metadata.outputs.checksum }}
         run: |
           set -euo pipefail
-          LCR_RELEASE_TAG="ios-build-${GITHUB_RUN_NUMBER}"
+          LCR_RELEASE_TAG="ios-v${LCR_APP_VERSION}-build${LCR_APP_BUILD}-${GITHUB_RUN_NUMBER}"
+          LCR_RELEASE_TITLE="iOS ${LCR_APP_VERSION} (빌드 ${LCR_APP_BUILD} · #${GITHUB_RUN_NUMBER})"
           LCR_NOTES="$RUNNER_TEMP/ios-release-notes.md"
           test -s dist/LC-Repeater-unsigned.ipa
           test -s dist/LC-Repeater-unsigned.ipa.sha256
           shasum -a 256 -c dist/LC-Repeater-unsigned.ipa.sha256
           cat > "$LCR_NOTES" <<EOF
-          Automated iPhone IPA build from main.
+          LC Repeater iOS ${LCR_APP_VERSION}
 
+          - 앱 버전: ${LCR_APP_VERSION}
+          - 앱 빌드: ${LCR_APP_BUILD}
+          - 자동 배포 번호: ${GITHUB_RUN_NUMBER}
           - Source commit: $GITHUB_SHA
           - Xcode: $LCR_XCODE_VERSION
           - iOS SDK: $LCR_IOS_SDK
           - Build: $GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID
 
-          Download LC-Repeater-unsigned.ipa and sign it with Feather before installing.
+          Download $(basename "$LCR_RELEASE_IPA") and sign it with Feather before installing.
           The SHA-256 checksum is attached alongside the IPA.
           Simulator verification runs after publication; see the build link for its results.
           EOF
           if gh release view "$LCR_RELEASE_TAG" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            gh release edit "$LCR_RELEASE_TAG" --repo "$GITHUB_REPOSITORY" \
+              --title "$LCR_RELEASE_TITLE" --notes-file "$LCR_NOTES"
             gh release upload "$LCR_RELEASE_TAG" --repo "$GITHUB_REPOSITORY" \
-              dist/LC-Repeater-unsigned.ipa dist/LC-Repeater-unsigned.ipa.sha256 --clobber
+              "$LCR_RELEASE_IPA" "$LCR_RELEASE_CHECKSUM" --clobber
           else
             gh release create "$LCR_RELEASE_TAG" --repo "$GITHUB_REPOSITORY" \
-              --target "$GITHUB_SHA" --title "iOS build $GITHUB_RUN_NUMBER" --latest \
+              --target "$GITHUB_SHA" --title "$LCR_RELEASE_TITLE" --latest \
               --notes-file "$LCR_NOTES" \
-              dist/LC-Repeater-unsigned.ipa dist/LC-Repeater-unsigned.ipa.sha256
+              "$LCR_RELEASE_IPA" "$LCR_RELEASE_CHECKSUM"
           fi
           printf 'IPA release: %s/%s/releases/tag/%s\n' \
             "$GITHUB_SERVER_URL" "$GITHUB_REPOSITORY" "$LCR_RELEASE_TAG" >> "$GITHUB_STEP_SUMMARY"

@@ -1,0 +1,43 @@
+name: Add app versions to existing iOS releases
+
+on:
+  workflow_dispatch:
+  push:
+    branches: ['codex/repair-ios-release-versions']
+
+permissions:
+  contents: write
+
+jobs:
+  repair:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    env:
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - name: Read published IPA versions and update release labels
+        run: |
+          python3 - <<'PY'
+          import json, os, plistlib, subprocess, tempfile, zipfile
+          from pathlib import Path
+          repo = os.environ['GITHUB_REPOSITORY']
+          for tag in ('ios-build-39', 'ios-build-38'):
+              with tempfile.TemporaryDirectory() as temporary:
+                  folder = Path(temporary)
+                  subprocess.run(['gh', 'release', 'download', tag, '--repo', repo,
+                                  '--pattern', 'LC-Repeater-unsigned.ipa', '--dir', str(folder)], check=True)
+                  with zipfile.ZipFile(folder / 'LC-Repeater-unsigned.ipa') as ipa:
+                      info = plistlib.loads(ipa.read('Payload/LCRepeater.app/Info.plist'))
+                  version, build = info['CFBundleShortVersionString'], info['CFBundleVersion']
+                  release = json.loads(subprocess.check_output(
+                      ['gh', 'release', 'view', tag, '--repo', repo, '--json', 'body'], text=True))
+                  heading = f'앱 버전: **{version}**\n앱 빌드: **{build}**\n\n'
+                  body = heading + release['body'].removeprefix(heading)
+                  notes = folder / 'notes.md'
+                  notes.write_text(body)
+                  number = tag.removeprefix('ios-build-')
+                  title = f'iOS {version} (빌드 {build} · #{number})'
+                  subprocess.run(['gh', 'release', 'edit', tag, '--repo', repo,
+                                  '--title', title, '--notes-file', str(notes)], check=True)
+                  print(f'{tag}: {title}')
+          PY
