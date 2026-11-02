@@ -18,15 +18,25 @@ concurrency:
 
 jobs:
   build:
-    runs-on: macos-26
+    # xcode-27 image ships Xcode 27.1 (iOS 27.1 SDK), required for full-screen iPhone Duo builds.
+    runs-on: xcode-27
     timeout-minutes: 30
     steps:
       - uses: actions/checkout@v4
-      - name: Select newest stable Xcode (27.1+ builds full-screen for iPhone Duo)
+      - name: Select newest Xcode (27.1+ builds full-screen for iPhone Duo)
         run: |
-          LCR_XCODE=$(ls -d /Applications/Xcode_*.app 2>/dev/null | grep -viE 'beta|release_candidate' | sort -V | tail -1 || true)
-          if [ -n "$LCR_XCODE" ]; then sudo xcode-select -s "$LCR_XCODE"; fi
+          set -euo pipefail
+          LCR_CANDIDATES=$(for app in /Applications/Xcode*.app; do
+            [ -L "$app" ] && continue
+            info=$("$app/Contents/Developer/usr/bin/xcodebuild" -version 2>/dev/null) || continue
+            echo "$(echo "$info" | awk 'NR==1{print $2}') $(echo "$info" | awk 'NR==2{print $3}') $app"
+          done | sort -V)
+          echo "$LCR_CANDIDATES"
+          LCR_XCODE=$(echo "$LCR_CANDIDATES" | tail -1 | cut -d' ' -f3-)
+          sudo xcode-select -s "$LCR_XCODE"
           xcodebuild -version
+          xcrun --sdk iphoneos --show-sdk-version
+          xcrun simctl list runtimes
       - name: Confirm SDK supports non-Apple-Intelligence translation strategy
         run: |
           xcodebuild -version
@@ -105,7 +115,14 @@ jobs:
           set -euo pipefail
           LCR_DUO=$(xcrun simctl list devices available -j | python3 -c 'import json,sys; d=json.load(sys.stdin); print(next((x["udid"] for group in d["devices"].values() for x in group if "iPhone Duo" in x["name"]), ""))')
           if [ -z "$LCR_DUO" ]; then
-            echo "::notice::No iPhone Duo simulator on this runner (needs Xcode 27.1+); skipped Duo preview."
+            LCR_DUO_TYPE=$(xcrun simctl list devicetypes -j | python3 -c 'import json,sys; print(next((t["identifier"] for t in json.load(sys.stdin)["devicetypes"] if "iPhone Duo" in t["name"]), ""))')
+            LCR_RUNTIME=$(xcrun simctl list runtimes available -j | python3 -c 'import json,sys; r=[x for x in json.load(sys.stdin)["runtimes"] if x["platform"]=="iOS"]; r.sort(key=lambda x: tuple(map(int, x["version"].split(".")))); print(r[-1]["identifier"] if r else "")')
+            if [ -n "$LCR_DUO_TYPE" ] && [ -n "$LCR_RUNTIME" ]; then
+              LCR_DUO=$(xcrun simctl create "LCR iPhone Duo" "$LCR_DUO_TYPE" "$LCR_RUNTIME" || true)
+            fi
+          fi
+          if [ -z "$LCR_DUO" ]; then
+            echo "::warning::No iPhone Duo simulator on this runner; skipped Duo preview."
             exit 0
           fi
           xcrun simctl boot "$LCR_DUO" || true
