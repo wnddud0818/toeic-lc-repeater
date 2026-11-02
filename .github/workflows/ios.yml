@@ -10,7 +10,7 @@ on:
     paths: ['ios/**', 'scripts/*ios*', 'export_lesson.py', 'server.py', 'tests/**', '.github/workflows/ios.yml']
 
 permissions:
-  contents: read
+  contents: write
 
 concurrency:
   group: ios-${{ github.event.pull_request.head.ref || github.ref_name }}
@@ -37,14 +37,24 @@ jobs:
           xcodebuild -version
           xcrun --sdk iphoneos --show-sdk-version
           xcrun simctl list runtimes
-      - name: Confirm SDK supports non-Apple-Intelligence translation strategy
+      - name: Require Xcode and iOS SDK 27.1 or newer
+        id: toolchain
+        shell: bash
         run: |
-          xcodebuild -version
-          xcrun --sdk iphoneos --show-sdk-version
+          set -euo pipefail
           python3 - <<'PY'
-          import subprocess
-          version = subprocess.check_output(['xcrun', '--sdk', 'iphoneos', '--show-sdk-version'], text=True).strip()
-          assert tuple(map(int, version.split('.')[:2])) >= (26, 4), version
+          import os, subprocess
+          xcode_info = subprocess.check_output(['xcodebuild', '-version'], text=True).strip()
+          xcode = xcode_info.splitlines()[0].split()[1]
+          sdk = subprocess.check_output(['xcrun', '--sdk', 'iphoneos', '--show-sdk-version'], text=True).strip()
+          print(xcode_info)
+          print(f'iOS SDK {sdk}')
+          for label, version in [('Xcode', xcode), ('iOS SDK', sdk)]:
+              parts = tuple(map(int, (version.split('.') + ['0'])[:2]))
+              if parts < (27, 1):
+                  raise SystemExit(f'{label} 27.1+ is required for iPhone Duo; found {version}')
+          with open(os.environ['GITHUB_OUTPUT'], 'a') as output:
+              output.write(f'xcode_version={xcode}\nsdk_version={sdk}\n')
           PY
       - name: Check project and Python export
         run: |
@@ -59,6 +69,51 @@ jobs:
       - name: Build unsigned iPhone IPA
         id: ipa
         run: bash scripts/build_ios.sh
+      - name: Upload IPA and checksum immediately after build
+        uses: actions/upload-artifact@v4
+        with:
+          name: LC-Repeater-iOS-unsigned
+          path: |
+            dist/LC-Repeater-unsigned.ipa
+            dist/LC-Repeater-unsigned.ipa.sha256
+          if-no-files-found: error
+      - name: Publish iOS IPA to GitHub Releases
+        if: github.ref == 'refs/heads/main' && (github.event_name == 'push' || github.event_name == 'workflow_dispatch')
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          LCR_XCODE_VERSION: ${{ steps.toolchain.outputs.xcode_version }}
+          LCR_IOS_SDK: ${{ steps.toolchain.outputs.sdk_version }}
+        run: |
+          set -euo pipefail
+          LCR_RELEASE_TAG="ios-build-${GITHUB_RUN_NUMBER}"
+          LCR_NOTES="$RUNNER_TEMP/ios-release-notes.md"
+          test -s dist/LC-Repeater-unsigned.ipa
+          test -s dist/LC-Repeater-unsigned.ipa.sha256
+          shasum -a 256 -c dist/LC-Repeater-unsigned.ipa.sha256
+          cat > "$LCR_NOTES" <<EOF
+          Automated iPhone IPA build from main.
+
+          - Source commit: $GITHUB_SHA
+          - Xcode: $LCR_XCODE_VERSION
+          - iOS SDK: $LCR_IOS_SDK
+          - Build: $GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID
+
+          Download LC-Repeater-unsigned.ipa and sign it with Feather before installing.
+          The SHA-256 checksum is attached alongside the IPA.
+          Simulator verification runs after publication; see the build link for its results.
+          EOF
+          if gh release view "$LCR_RELEASE_TAG" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            gh release upload "$LCR_RELEASE_TAG" --repo "$GITHUB_REPOSITORY" \
+              dist/LC-Repeater-unsigned.ipa dist/LC-Repeater-unsigned.ipa.sha256 --clobber
+          else
+            gh release create "$LCR_RELEASE_TAG" --repo "$GITHUB_REPOSITORY" \
+              --target "$GITHUB_SHA" --title "iOS build $GITHUB_RUN_NUMBER" --latest \
+              --notes-file "$LCR_NOTES" \
+              dist/LC-Repeater-unsigned.ipa dist/LC-Repeater-unsigned.ipa.sha256
+          fi
+          printf 'IPA release: %s/%s/releases/tag/%s\n' \
+            "$GITHUB_SERVER_URL" "$GITHUB_REPOSITORY" "$LCR_RELEASE_TAG" >> "$GITHUB_STEP_SUMMARY"
       - name: Build and capture iPhone simulator
         shell: bash
         run: |
@@ -144,18 +199,16 @@ jobs:
           print('iPhone Duo simulator import and playback passed')
           PY
           xcrun simctl io "$LCR_DUO" screenshot dist/ios-duo-player-preview.png
-      - name: Upload IPA, checksum, and simulator preview
+      - name: Upload simulator previews
         if: ${{ !cancelled() && steps.ipa.outcome == 'success' }}
         uses: actions/upload-artifact@v4
         with:
-          name: LC-Repeater-iOS-unsigned
+          name: LC-Repeater-iOS-simulator-preview
           path: |
-            dist/LC-Repeater-unsigned.ipa
-            dist/LC-Repeater-unsigned.ipa.sha256
             dist/ios-player-preview.png
             dist/ios-start-preview.png
             dist/ios-local-player-preview.png
             dist/ios-local-availability-preview.png
             dist/ios-local-smoke-result.json
             dist/ios-duo-*.png
-          if-no-files-found: error
+          if-no-files-found: warn
