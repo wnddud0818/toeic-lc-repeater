@@ -13,9 +13,18 @@ struct LCRepeaterApp: App {
 
     var body: some Scene {
         WindowGroup {
-            AppHomeView()
+            rootView
                 .environmentObject(library)
                 .environmentObject(player)
         }
+    }
+
+    @ViewBuilder private var rootView: some View {
+        #if DEBUG
+        if CommandLine.arguments.contains("--smoke-audio-picker") { AudioFilePickerSmokeView() }
+        else { AppHomeView() }
+        #else
+        AppHomeView()
+        #endif
     }
 }

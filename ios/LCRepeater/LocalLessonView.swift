@@ -1,6 +1,5 @@
 import SwiftUI
 import Translation
-import UniformTypeIdentifiers
 
 @available(iOS 26.0, *)
 struct LocalLessonView: View {
@@ -11,6 +10,9 @@ struct LocalLessonView: View {
     @State private var checking = true
     @State private var availabilityError: String?
     @State private var configuration: TranslationSession.Configuration?
+    @Binding var incomingAudio: URL?
+    @Binding var incomingError: String?
+    let onBusyChange: (Bool) -> Void
     let onComplete: (UUID) -> Void
 
     var body: some View {
@@ -78,11 +80,13 @@ struct LocalLessonView: View {
             }
         }
         .interactiveDismissDisabled(processor.isBusy)
-        .fileImporter(isPresented: $showingPicker, allowedContentTypes: [.audio]) { result in
-            switch result {
-            case .success(let url): processor.select(url); start()
-            case .failure: break // Cancelling the system picker does not start a job.
-            }
+        .background {
+            AudioFilePicker(isPresented: $showingPicker) { url in
+                // The picker finishes dismissing before invoking this callback.
+                guard let url else { return }
+                processor.select(url)
+                start()
+            }.frame(width: 0, height: 0)
         }
         .translationTask(configuration) { session in
             if let id = await processor.run(session: session, library: library) {
@@ -90,7 +94,15 @@ struct LocalLessonView: View {
             }
         }
         .task { await checkAvailability() }
-        .onChange(of: processor.isBusy) { _, busy in UIApplication.shared.isIdleTimerDisabled = busy }
+        .onChange(of: incomingAudio) { _, _ in acceptIncomingAudio() }
+        .onChange(of: processor.isBusy) { _, busy in
+            UIApplication.shared.isIdleTimerDisabled = busy
+            onBusyChange(busy)
+        }
+        .alert("알림", isPresented: Binding(get: { incomingError != nil },
+                                           set: { if !$0 { incomingError = nil } })) {
+            Button("확인", role: .cancel) { incomingError = nil }
+        } message: { Text(incomingError ?? "") }
         .onDisappear {
             processor.stopAndDiscard()
             UIApplication.shared.isIdleTimerDisabled = false
@@ -106,5 +118,18 @@ struct LocalLessonView: View {
         checking = true
         availabilityError = await LocalLessonProcessor.availabilityError()
         checking = false
+        acceptIncomingAudio()
+    }
+
+    private func acceptIncomingAudio() {
+        guard !checking, let url = incomingAudio else { return }
+        incomingAudio = nil
+        guard availabilityError == nil else { return }
+        guard !processor.isBusy else {
+            incomingError = "현재 음원의 처리를 완료하거나 취소한 뒤 다시 열어 주세요."
+            return
+        }
+        processor.select(url)
+        start()
     }
 }

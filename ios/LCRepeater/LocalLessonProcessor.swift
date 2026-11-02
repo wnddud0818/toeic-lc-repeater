@@ -81,9 +81,6 @@ final class LocalLessonProcessor: ObservableObject {
         if let message = await Self.availabilityError() {
             throw NSError(domain: "LocalLesson", code: 1, userInfo: [NSLocalizedDescriptionKey: message])
         }
-        status = "영어·한국어 번역 모델을 준비하는 중이에요"
-        progress = nil
-        try await session.prepareTranslation()
         try Task.checkCancellation()
         if staging == nil { staging = try library.localStagingArea(for: id) }
         guard let staging else { throw LocalLessonError.invalidAudio }
@@ -94,6 +91,11 @@ final class LocalLessonProcessor: ObservableObject {
             }
         }
         guard let prepared else { throw LocalLessonError.invalidAudio }
+        // Reject unreadable/non-audio files before asking to download models.
+        status = "영어·한국어 번역 모델을 준비하는 중이에요"
+        progress = nil
+        try await session.prepareTranslation()
+        try Task.checkCancellation()
         if draft == nil {
             status = "영어 전사 모델 준비·전사 중이에요"
             progress = nil

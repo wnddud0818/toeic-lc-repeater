@@ -140,7 +140,7 @@ struct LibraryView: View {
         } message: {
             Text(library.error ?? player.error ?? "")
         }
-        .task {
+        .task(id: openLessonID) {
             #if DEBUG
             if CommandLine.arguments.contains("--smoke-test") { await runImportSmokeTest(); return }
             #endif

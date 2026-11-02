@@ -7,6 +7,7 @@ let package = Package(
     products: [.library(name: "LessonCore", targets: ["LessonCore"])],
     targets: [
         .target(name: "LessonCore", path: "LCRepeater/Core"),
-        .testTarget(name: "LessonCoreTests", dependencies: ["LessonCore"], path: "LCRepeaterTests")
+        .testTarget(name: "LessonCoreTests", dependencies: ["LessonCore"], path: "LCRepeaterTests",
+                    resources: [.copy("Fixtures")])
     ]
 )
