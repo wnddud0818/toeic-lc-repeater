@@ -54,11 +54,13 @@ def _stop_group(*_):
 
 
 def watch_stdin():
+    # Read the raw descriptor: a daemon thread blocked in sys.stdin.buffer.read() holds the buffered
+    # reader's lock, and Python then aborts at interpreter shutdown ("could not acquire lock").
     def run():
         try:
-            while sys.stdin.buffer.read(4096):
+            while os.read(0, 4096):
                 pass
-        except (OSError, ValueError):
+        except OSError:
             pass
         _stop_group()
     threading.Thread(target=run, daemon=True).start()
@@ -177,9 +179,14 @@ def main(argv=None):
     commands = {'status': cmd_status, 'download-model': cmd_download_model,
                 'transcribe': cmd_transcribe, 'translate': cmd_translate}
     try:
-        return commands[args.command](args)
+        code = commands[args.command](args)
     except Exception as e:
-        return fail(e)
+        code = fail(e)
+    if args.watch_stdin:
+        # The result line is already written; leave without waiting for the stdin watcher.
+        sys.stdout.flush()
+        os._exit(code)
+    return code
 
 
 if __name__ == '__main__':

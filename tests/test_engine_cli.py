@@ -111,6 +111,21 @@ class EngineCLITests(unittest.TestCase):
         self.assertEqual([s['ko'] for s in lesson['sentences']], ['번역 1', '번역 2'])
         self.assertEqual(events(proc.stdout)[-1], {'event': 'done', 'lesson': str(lesson_path), 'translated': 2})
 
+    def test_watched_engine_exits_cleanly_while_the_app_keeps_stdin_open(self):
+        # The Mac app keeps the pipe open until the engine ends; finishing must not abort Python.
+        for _ in range(3):
+            proc = subprocess.Popen([sys.executable, str(ROOT / 'engine_cli.py'), '--watch-stdin',
+                                     '--model', str(self.model), 'status'],
+                                    stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+                                    env=dict(os.environ, WHISPER_BIN=str(self.whisper)), cwd=str(ROOT))
+            out, err = proc.stdout.read(), proc.stderr.read()
+            code = proc.wait(timeout=30)
+            proc.stdin.close()
+            proc.stdout.close()
+            proc.stderr.close()
+            self.assertEqual(code, 0, err.decode())
+            self.assertEqual(events(out.decode())[-1]['event'], 'done')
+
     def test_closing_stdin_stops_the_engine(self):
         slow = self.root / 'slow-whisper'
         slow.write_text('#!/bin/sh\nsleep 30\n')
