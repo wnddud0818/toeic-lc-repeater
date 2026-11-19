@@ -105,7 +105,7 @@ final class RepeaterPlayer: ObservableObject {
         lessonID = nil
         sentenceID = nil
         MPNowPlayingInfoCenter.default().nowPlayingInfo = nil
-        try? AVAudioSession.sharedInstance().setActive(false, options: .notifyOthersOnDeactivation)
+        deactivateSession()
     }
 
     func toggle() {
@@ -138,7 +138,7 @@ final class RepeaterPlayer: ObservableObject {
         isPlaying = false
         phase = "일시정지"
         updateNowPlaying()
-        try? AVAudioSession.sharedInstance().setActive(false, options: .notifyOthersOnDeactivation)
+        deactivateSession()
     }
 
     private func resume() {
@@ -173,10 +173,19 @@ final class RepeaterPlayer: ObservableObject {
         phase = "재생을 눌러 시작하세요"
     }
 
+    /// macOS has no audio session: the engine plays through the current output device.
     private func activateSession() throws {
+        #if os(iOS)
         let session = AVAudioSession.sharedInstance()
         try session.setCategory(.playback, mode: .default)
         try session.setActive(true)
+        #endif
+    }
+
+    private func deactivateSession() {
+        #if os(iOS)
+        try? AVAudioSession.sharedInstance().setActive(false, options: .notifyOthersOnDeactivation)
+        #endif
     }
 
     private func fillQueue() throws {
@@ -260,7 +269,7 @@ final class RepeaterPlayer: ObservableObject {
             node.stop()
             engine.pause()
             updateNowPlaying()
-            try? AVAudioSession.sharedInstance().setActive(false, options: .notifyOthersOnDeactivation)
+            deactivateSession()
         } else if isPlaying {
             refreshDisplay()
         }
@@ -282,7 +291,7 @@ final class RepeaterPlayer: ObservableObject {
         resetQueue()
         self.error = "재생하지 못했어요: \(cause.localizedDescription)"
         updateNowPlaying()
-        try? AVAudioSession.sharedInstance().setActive(false, options: .notifyOthersOnDeactivation)
+        deactivateSession()
     }
 
     private func updateNowPlaying(elapsed: Double = 0) {
@@ -318,6 +327,7 @@ final class RepeaterPlayer: ObservableObject {
 
     private func observeAudioSession() {
         let center = NotificationCenter.default
+        #if os(iOS)
         observers.append(center.addObserver(forName: AVAudioSession.interruptionNotification, object: nil, queue: .main) {
             [weak self] notification in
             let type = (notification.userInfo?[AVAudioSessionInterruptionTypeKey] as? UInt)
@@ -345,6 +355,7 @@ final class RepeaterPlayer: ObservableObject {
                 }
             }
         })
+        #endif
         observers.append(center.addObserver(forName: .AVAudioEngineConfigurationChange, object: engine, queue: .main) {
             [weak self] _ in
             Task { @MainActor [weak self] in

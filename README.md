@@ -27,7 +27,31 @@ FFmpeg·whisper-cli는 포함되어 있고, WebView2가 없으면 설치 중 준
 첫 실행 때 모델을 내려받으며, 데이터는 `%LOCALAPPDATA%\LC Repeater\`에 저장된다.
 설치·번역 준비·빌드·검증 범위는 [Windows 앱 안내](docs/windows.md)를 참고한다.
 
-## 맥 앱으로 쓰기
+## 네이티브 맥 앱으로 쓰기 (macOS 26+, Apple Silicon)
+
+SwiftUI로 만든 맥 앱이다. 새 레슨을 만들 때 전사와 번역 방식을 각각 고른다.
+
+| | Apple 기기 내 처리 | 기존 방식 |
+|---|---|---|
+| 전사 | Apple 음성 인식(`SpeechAnalyzer`) | Whisper (whisper.cpp, 모델 547MB) |
+| 번역 | Apple 번역(`Translation`) | Claude (`claude -p`) |
+
+- 영어·일본어 음원을 창에 끌어다 놓거나 **새 레슨 만들기**(⌘N)로 만든다. 번역이 실패하면 받아쓰기 결과는 남아서 다른 번역 방식으로 다시 하거나 번역 없이 저장할 수 있다.
+- 레슨을 연 뒤에도 툴바의 **다시 번역**으로 Apple이나 Claude 번역을 다시 할 수 있다.
+- 키보드는 웹 플레이어와 같다(Space, ←/→, T, R). 문장 목록은 오른쪽에 열고 닫는다.
+- **아이폰용으로 내보내기**(⌘E)로 `.lcrlesson`을 만들어 아이폰 앱으로 옮길 수 있고, PC·아이폰 레슨 파일도 가져올 수 있다. 기존 맥 앱에서 처리한 레슨은 **파일 → 이전 맥 앱 레슨 가져오기**로 옮긴다.
+- Whisper·Claude는 기존 `pipeline.py`를 앱 안에 helper(`lcr-engine`)로 넣어 그대로 쓴다. Whisper 모델은 설정이나 새 레슨 창에서 한 번 내려받으며, 기존 맥 앱이 받은 모델이 있으면 그대로 쓴다.
+
+```bash
+bash scripts/build_mac.sh   # dist/macos/LC Repeater.app 과 zip
+```
+
+빌드에는 Xcode 26.4 이상(macOS SDK 26.4+)과 Python 3.9 이상이 필요하다. 서명하지 않은(ad-hoc) 앱이라 처음 열 때 막히면 시스템 설정 → 개인정보 보호 및 보안에서 **그래도 열기**를 누른다. 구조와 개발 방법은 [네이티브 맥 앱 안내](docs/macos-native.md)에 정리했다.
+
+## 기존 맥 앱으로 쓰기 (웹 화면, macOS 13+)
+
+macOS 26보다 오래된 맥에서는 아래 Python·웹 화면 앱을 쓴다.
+
 
 ```bash
 ./build_app.sh

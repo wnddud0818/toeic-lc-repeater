@@ -2,7 +2,7 @@ import Foundation
 import Speech
 import AVFoundation
 
-@available(iOS 26.0, *)
+@available(iOS 26.0, macOS 26.0, *)
 actor AppleSpeechTranscription {
     static func locale(for language: StudyLanguage) async -> Locale? {
         await SpeechTranscriber.supportedLocale(equivalentTo: Locale(identifier: language.speechLocaleIdentifier))

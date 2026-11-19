@@ -15,6 +15,7 @@ on:
       - 'static/**'
       - '*.py'
       - 'build_app.sh'
+      - 'scripts/build_whisper_macos.sh'
       - 'requirements-build.txt'
       - 'scripts/make_icon.py'
   pull_request:
@@ -25,6 +26,7 @@ on:
       - 'static/**'
       - '*.py'
       - 'build_app.sh'
+      - 'scripts/build_whisper_macos.sh'
       - 'requirements-build.txt'
       - 'scripts/make_icon.py'
 

@@ -34,11 +34,14 @@ final class LessonLibrary: ObservableObject {
                 else { return nil }
                 return entry
             }.sorted { $0.importedAt > $1.importedAt }
+            #if os(iOS)
+            // Shown in the Files app (UIFileSharingEnabled) as a place to drop .lcrlesson files.
             let documents = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask).first
             if let documents {
                 try FileManager.default.createDirectory(
                     at: documents.appendingPathComponent("받은 레슨"), withIntermediateDirectories: true)
             }
+            #endif
         } catch {
             self.error = "레슨 보관함을 열지 못했어요: \(error.localizedDescription)"
         }
@@ -116,6 +119,24 @@ final class LessonLibrary: ObservableObject {
         try JSONEncoder().encode(entry).write(
             to: root.appendingPathComponent(id.uuidString).appendingPathComponent("entry.json"), options: .atomic)
         entries[index] = entry
+    }
+
+    /// Replaces a lesson's text (for example after translating it again). Times and audio stay the same.
+    func updateLesson(_ id: UUID, _ lesson: Lesson) throws {
+        guard let index = entries.firstIndex(where: { $0.id == id }) else { throw LessonError.invalidLesson }
+        try lesson.validate()
+        var entry = entries[index]
+        guard lesson.duration == entry.lesson.duration else { throw LessonError.invalidAudio }
+        entry.lesson = lesson
+        try JSONEncoder().encode(entry).write(
+            to: root.appendingPathComponent(id.uuidString).appendingPathComponent("entry.json"), options: .atomic)
+        entries[index] = entry
+    }
+
+    /// Writes a .lcrlesson file that the iPhone app can import.
+    func exportArchive(_ id: UUID, to destination: URL) throws {
+        guard let entry = entry(for: id) else { throw LessonError.invalidLesson }
+        try LessonArchive.pack(lesson: entry.lesson, audio: audioURL(for: id), to: destination)
     }
 
     func delete(_ id: UUID) {

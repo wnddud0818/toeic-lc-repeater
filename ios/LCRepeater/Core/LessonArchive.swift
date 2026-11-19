@@ -80,6 +80,55 @@ enum LessonArchive {
         return manifest.lesson
     }
 
+    /// Writes the same format as export_lesson.py, so a lesson made on the Mac opens on iPhone.
+    /// The destination is replaced only after the whole file has been written.
+    static func pack(lesson: Lesson, audio audioURL: URL, to destination: URL) throws {
+        try lesson.validate()
+        let duration = try wavDuration(at: audioURL)
+        guard abs(duration - lesson.duration) <= 0.05 else { throw LessonError.invalidAudio }
+        let size = (try FileManager.default.attributesOfItem(atPath: audioURL.path)[.size] as? NSNumber)?.uint64Value ?? 0
+        guard size >= 44, size <= maxAudio else { throw LessonError.invalidAudio }
+        var hasher = SHA256()
+        do {
+            let input = try FileHandle(forReadingFrom: audioURL)
+            defer { try? input.close() }
+            while let chunk = try input.read(upToCount: 1024 * 1024), !chunk.isEmpty { hasher.update(data: chunk) }
+        }
+        let digest = hasher.finalize().map { String(format: "%02x", $0) }.joined()
+        let manifest = ArchiveManifest(format: "toeic-lc-repeater.lesson", version: 1, lesson: lesson,
+                                       audio: .init(format: "wav", byteCount: size, sha256: digest,
+                                                    sampleRate: 32_000, channels: 1, sampleWidth: 2))
+        let encoded = try JSONEncoder().encode(manifest)
+        guard UInt64(encoded.count) <= maxManifest else { throw LessonError.invalidLesson }
+        let temp = destination.deletingLastPathComponent()
+            .appendingPathComponent("." + UUID().uuidString + ".part")
+        guard FileManager.default.createFile(atPath: temp.path, contents: nil) else { throw LessonError.invalidArchive }
+        do {
+            let output = try FileHandle(forWritingTo: temp)
+            defer { try? output.close() }
+            var header = magic
+            withUnsafeBytes(of: UInt64(encoded.count).littleEndian) { header.append(contentsOf: $0) }
+            try output.write(contentsOf: header + encoded)
+            let input = try FileHandle(forReadingFrom: audioURL)
+            defer { try? input.close() }
+            var written: UInt64 = 0
+            while let chunk = try input.read(upToCount: 1024 * 1024), !chunk.isEmpty {
+                try output.write(contentsOf: chunk)
+                written += UInt64(chunk.count)
+            }
+            guard written == size else { throw LessonError.invalidAudio }
+            try output.synchronize()
+            if FileManager.default.fileExists(atPath: destination.path) {
+                _ = try FileManager.default.replaceItemAt(destination, withItemAt: temp)
+            } else {
+                try FileManager.default.moveItem(at: temp, to: destination)
+            }
+        } catch {
+            try? FileManager.default.removeItem(at: temp)
+            throw error
+        }
+    }
+
     static func readExactly(_ handle: FileHandle, count: Int) throws -> Data {
         var data = Data()
         while data.count < count {

@@ -284,7 +284,8 @@ def transcribe(wav16, out_prefix, on_progress=None, lang=DEFAULT_LANG):
     cmd = [WHISPER, '-m', WHISPER_MODEL, '-f', wav16, '-l', lang,
            '-ojf', '-of', out_prefix, '-pp', '-sns',
            '-mc', '0',                 # 앞 문장 문맥을 끊어 보기 기호(A. B. C.) 환각을 막는다
-           '-nfa', '-dtw', 'large.v3.turbo',
+           # DTW 정렬 프리셋은 모델과 짝이 맞아야 한다(검증용 작은 모델은 LCR_WHISPER_DTW=tiny 등)
+           '-nfa', '-dtw', os.environ.get('LCR_WHISPER_DTW') or 'large.v3.turbo',
            '-t', str(min(8, os.cpu_count() or 4))]
     proc = subprocess.Popen(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.PIPE,
                             stdin=subprocess.DEVNULL, encoding='utf-8', errors='replace', bufsize=1,

@@ -33,13 +33,7 @@ final class LocalLessonProcessor: ObservableObject {
     }
 
     static func configuration(for language: StudyLanguage) -> TranslationSession.Configuration {
-        let source = Locale.Language(identifier: language.rawValue)
-        let target = Locale.Language(identifier: "ko")
-        if #available(iOS 26.4, *) {
-            return .init(source: source, target: target, preferredStrategy: .lowLatency)
-        }
-        // Prior to iOS 26.4, TranslationSession only uses traditional models.
-        return .init(source: source, target: target)
+        AppleLessonTranslator.configuration(for: language)
     }
 
     static func availabilityError(for language: StudyLanguage) async -> String? {
@@ -47,12 +41,7 @@ final class LocalLessonProcessor: ObservableObject {
         guard await AppleSpeechTranscription.locale(for: language) != nil else {
             return LocalLessonError.unsupportedSpeech(language).localizedDescription
         }
-        let availability: LanguageAvailability
-        if #available(iOS 26.4, *) { availability = LanguageAvailability(preferredStrategy: .lowLatency) }
-        else { availability = LanguageAvailability() }
-        let status = await availability.status(from: Locale.Language(identifier: language.rawValue),
-                                               to: Locale.Language(identifier: "ko"))
-        return status == .unsupported ? LocalLessonError.unsupportedTranslation(language).localizedDescription : nil
+        return await AppleLessonTranslator.unsupportedError(for: language)?.localizedDescription
     }
 
     func select(_ url: URL) {
@@ -125,22 +114,9 @@ final class LocalLessonProcessor: ObservableObject {
         }
         guard var lesson = draft else { throw LocalLessonError.noSpeech }
         status = "한국어로 번역하는 중이에요"
-        let pending = lesson.sentences.indices.filter { lesson.sentences[$0].ko.isEmpty }
-        for offset in stride(from: 0, to: pending.count, by: 20) {
-            try Task.checkCancellation()
-            let indices = Array(pending[offset..<min(offset + 20, pending.count)])
-            let requests = indices.map { TranslationSession.Request(sourceText: lesson.sentences[$0].en,
-                                                                      clientIdentifier: String(lesson.sentences[$0].i)) }
-            let responses = try await session.translations(from: requests)
-            let translations = try responses.map { response -> TranslatedSentence in
-                guard let key = response.clientIdentifier, let id = Int(key) else {
-                    throw LocalLessonError.incompleteTranslation
-                }
-                return .init(id: id, text: response.targetText)
-            }
-            lesson = try LessonTranslation.applying(translations, to: lesson, ids: indices.map { lesson.sentences[$0].i })
-            draft = lesson
-            progress = Double(lesson.sentences.filter { !$0.ko.isEmpty }.count) / Double(lesson.sentences.count)
+        lesson = try await AppleLessonTranslator.translateMissing(in: lesson, session: session) { updated in
+            draft = updated
+            progress = Double(updated.sentences.filter { !$0.ko.isEmpty }.count) / Double(updated.sentences.count)
         }
         try Task.checkCancellation()
         status = "레슨을 저장하는 중이에요"

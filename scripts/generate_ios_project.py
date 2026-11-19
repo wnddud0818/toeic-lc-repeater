@@ -6,6 +6,10 @@ import sys
 
 ROOT = Path(__file__).resolve().parents[1]
 PROJECT = ROOT / 'ios' / 'LCRepeater.xcodeproj'
+# Files in ios/LCRepeater that the native Mac app (ios/LCRepeaterMac) also compiles.
+MAC_SHARED = ['AppleLessonTranslator.swift', 'AppleSpeechTranscription.swift', 'LessonLibrary.swift',
+              'RepeaterPlayer.swift']
+MAC_DEPLOYMENT_TARGET = '26.0'
 
 
 def ident(value):
@@ -19,6 +23,12 @@ def quote(value):
 def generate():
     sources = sorted(p.relative_to(ROOT / 'ios' / 'LCRepeater').as_posix()
                      for p in (ROOT / 'ios' / 'LCRepeater').rglob('*.swift'))
+    mac_sources = sorted(p.relative_to(ROOT / 'ios' / 'LCRepeaterMac').as_posix()
+                         for p in (ROOT / 'ios' / 'LCRepeaterMac').rglob('*.swift'))
+    mac_shared = sorted(p for p in sources if p.startswith('Core/') or p in MAC_SHARED)
+    missing = set(MAC_SHARED) - set(sources)
+    if missing:
+        raise SystemExit('Shared Mac sources not found: %s' % ', '.join(sorted(missing)))
     objects = []
 
     def obj(key, body):
@@ -34,6 +44,21 @@ def generate():
     obj('file:assets', 'isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>";')
     obj('build:assets', 'isa = PBXBuildFile; fileRef = %s;' % ident('file:assets'))
     obj('product', 'isa = PBXFileReference; explicitFileType = wrapper.application; path = LCRepeater.app; sourceTree = BUILT_PRODUCTS_DIR;')
+    for path in mac_sources:
+        obj('macfile:' + path, 'isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = %s; sourceTree = "<group>";' % quote(path))
+        obj('macbuild:' + path, 'isa = PBXBuildFile; fileRef = %s;' % ident('macfile:' + path))
+    for path in mac_shared:
+        obj('macshared:' + path, 'isa = PBXBuildFile; fileRef = %s;' % ident('file:' + path))
+    obj('macfile:Info.plist', 'isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = Info.plist; sourceTree = "<group>";')
+    obj('macfile:assets', 'isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>";')
+    obj('macbuild:assets', 'isa = PBXBuildFile; fileRef = %s;' % ident('macfile:assets'))
+    obj('mac:product', 'isa = PBXFileReference; explicitFileType = wrapper.application; path = "LC Repeater.app"; sourceTree = BUILT_PRODUCTS_DIR;')
+    obj('mac:sources', 'isa = PBXSourcesBuildPhase; buildActionMask = 2147483647; files = %s; runOnlyForDeploymentPostprocessing = 0;' %
+        refs(['macbuild:' + p for p in mac_sources] + ['macshared:' + p for p in mac_shared]))
+    obj('mac:resources', 'isa = PBXResourcesBuildPhase; buildActionMask = 2147483647; files = %s; runOnlyForDeploymentPostprocessing = 0;' % refs(['macbuild:assets']))
+    obj('mac:frameworks', 'isa = PBXFrameworksBuildPhase; buildActionMask = 2147483647; files = (); runOnlyForDeploymentPostprocessing = 0;')
+    obj('group:mac', 'isa = PBXGroup; children = %s; path = LCRepeaterMac; sourceTree = "<group>";' %
+        refs(['macfile:' + p for p in mac_sources] + ['macfile:Info.plist', 'macfile:assets']))
     obj('uitest:file', 'isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LCRepeaterUITests/AudioFilePickerTests.swift; sourceTree = "<group>";')
     obj('uitest:build', 'isa = PBXBuildFile; fileRef = %s;' % ident('uitest:file'))
     obj('uitest:product', 'isa = PBXFileReference; explicitFileType = wrapper.cfbundle; path = LCRepeaterUITests.xctest; sourceTree = BUILT_PRODUCTS_DIR;')
@@ -45,9 +70,9 @@ def generate():
     obj('resources', 'isa = PBXResourcesBuildPhase; buildActionMask = 2147483647; files = %s; runOnlyForDeploymentPostprocessing = 0;' % refs(['build:assets']))
     obj('frameworks', 'isa = PBXFrameworksBuildPhase; buildActionMask = 2147483647; files = (); runOnlyForDeploymentPostprocessing = 0;')
     obj('group:source', 'isa = PBXGroup; children = %s; path = LCRepeater; sourceTree = "<group>";' % refs(['file:' + p for p in sources] + ['file:Info.plist', 'file:assets']))
-    obj('group:products', 'isa = PBXGroup; children = %s; name = Products; sourceTree = "<group>";' % refs(['product', 'uitest:product']))
-    obj('group:main', 'isa = PBXGroup; children = %s; sourceTree = "<group>";' % refs(['group:source', 'uitest:file', 'group:products']))
-    for level in ('project', 'target', 'uitest'):
+    obj('group:products', 'isa = PBXGroup; children = %s; name = Products; sourceTree = "<group>";' % refs(['product', 'uitest:product', 'mac:product']))
+    obj('group:main', 'isa = PBXGroup; children = %s; sourceTree = "<group>";' % refs(['group:source', 'group:mac', 'uitest:file', 'group:products']))
+    for level in ('project', 'target', 'uitest', 'mac'):
         for configuration in ('Debug', 'Release'):
             settings = {'SDKROOT': 'iphoneos', 'IPHONEOS_DEPLOYMENT_TARGET': '17.0', 'SWIFT_VERSION': '5.0'}
             if level == 'project':
@@ -59,6 +84,23 @@ def generate():
                                  'GENERATE_INFOPLIST_FILE': 'NO', 'CODE_SIGN_STYLE': 'Automatic',
                                  'ASSETCATALOG_COMPILER_APPICON_NAME': 'AppIcon', 'TARGETED_DEVICE_FAMILY': '1,2',
                                  'SUPPORTED_PLATFORMS': 'iphoneos iphonesimulator',
+                                 'SWIFT_OPTIMIZATION_LEVEL': '-Onone' if configuration == 'Debug' else '-O',
+                                 'DEBUG_INFORMATION_FORMAT': 'dwarf' if configuration == 'Debug' else 'dwarf-with-dsym',
+                                 'ENABLE_PREVIEWS': 'YES'})
+                if configuration == 'Debug':
+                    settings['SWIFT_ACTIVE_COMPILATION_CONDITIONS'] = 'DEBUG'
+            elif level == 'mac':
+                del settings['IPHONEOS_DEPLOYMENT_TARGET']
+                settings.update({'SDKROOT': 'macosx', 'MACOSX_DEPLOYMENT_TARGET': MAC_DEPLOYMENT_TARGET,
+                                 'SUPPORTED_PLATFORMS': 'macosx',
+                                 'PRODUCT_BUNDLE_IDENTIFIER': 'com.firstghrn.lcrepeater.mac',
+                                 'PRODUCT_NAME': 'LC Repeater', 'PRODUCT_MODULE_NAME': 'LCRepeaterMac',
+                                 'INFOPLIST_FILE': 'LCRepeaterMac/Info.plist', 'GENERATE_INFOPLIST_FILE': 'NO',
+                                 'ASSETCATALOG_COMPILER_APPICON_NAME': 'AppIcon', 'COMBINE_HIDPI_IMAGES': 'YES',
+                                 # Ad-hoc "sign to run locally": no Apple account is needed to build or run.
+                                 'CODE_SIGN_STYLE': 'Manual', 'CODE_SIGN_IDENTITY': '-', 'DEVELOPMENT_TEAM': '',
+                                 'ENABLE_HARDENED_RUNTIME': 'NO',
+                                 'LD_RUNPATH_SEARCH_PATHS': '@executable_path/../Frameworks',
                                  'SWIFT_OPTIMIZATION_LEVEL': '-Onone' if configuration == 'Debug' else '-O',
                                  'DEBUG_INFORMATION_FORMAT': 'dwarf' if configuration == 'Debug' else 'dwarf-with-dsym',
                                  'ENABLE_PREVIEWS': 'YES'})
@@ -78,8 +120,10 @@ def generate():
         (ident('target:config'), refs(['sources', 'frameworks', 'resources']), ident('product')))
     obj('uitest:target', 'isa = PBXNativeTarget; buildConfigurationList = %s; buildPhases = %s; buildRules = (); dependencies = %s; name = LCRepeaterUITests; productName = LCRepeaterUITests; productReference = %s; productType = "com.apple.product-type.bundle.ui-testing";' %
         (ident('uitest:config'), refs(['uitest:sources', 'uitest:frameworks']), refs(['uitest:dependency']), ident('uitest:product')))
-    obj('project', 'isa = PBXProject; attributes = { LastUpgradeCheck = 1600; TargetAttributes = { %s = { CreatedOnToolsVersion = 16.0; }; }; }; buildConfigurationList = %s; compatibilityVersion = "Xcode 14.0"; developmentRegion = ko; hasScannedForEncodings = 0; knownRegions = (en, ko, Base,); mainGroup = %s; productRefGroup = %s; projectDirPath = ""; projectRoot = ""; targets = %s;' %
-        (ident('target'), ident('project:config'), ident('group:main'), ident('group:products'), refs(['target', 'uitest:target'])))
+    obj('mac:target', 'isa = PBXNativeTarget; buildConfigurationList = %s; buildPhases = %s; buildRules = (); dependencies = (); name = LCRepeaterMac; productName = LCRepeaterMac; productReference = %s; productType = "com.apple.product-type.application";' %
+        (ident('mac:config'), refs(['mac:sources', 'mac:frameworks', 'mac:resources']), ident('mac:product')))
+    obj('project', 'isa = PBXProject; attributes = { LastUpgradeCheck = 1600; TargetAttributes = { %s = { CreatedOnToolsVersion = 16.0; }; %s = { CreatedOnToolsVersion = 16.0; }; }; }; buildConfigurationList = %s; compatibilityVersion = "Xcode 14.0"; developmentRegion = ko; hasScannedForEncodings = 0; knownRegions = (en, ko, Base,); mainGroup = %s; productRefGroup = %s; projectDirPath = ""; projectRoot = ""; targets = %s;' %
+        (ident('target'), ident('mac:target'), ident('project:config'), ident('group:main'), ident('group:products'), refs(['target', 'uitest:target', 'mac:target'])))
     text = '// !$*UTF8*$!\n{\n\tarchiveVersion = 1;\n\tclasses = {};\n\tobjectVersion = 56;\n\tobjects = {\n' + '\n'.join(objects) + '\n\t};\n\trootObject = ' + ident('project') + ';\n}\n'
     scheme = '''<?xml version="1.0" encoding="UTF-8"?>
 <Scheme LastUpgradeVersion="1600" version="1.3">
@@ -97,8 +141,25 @@ def generate():
   <ArchiveAction buildConfiguration="Release" revealArchiveInOrganizer="YES"/>
 </Scheme>
 ''' % (ident('target'), ident('uitest:target'), ident('target'))
+    mac_scheme = '''<?xml version="1.0" encoding="UTF-8"?>
+<Scheme LastUpgradeVersion="1600" version="1.3">
+  <BuildAction parallelizeBuildables="YES" buildImplicitDependencies="YES"><BuildActionEntries>
+    <BuildActionEntry buildForTesting="YES" buildForRunning="YES" buildForProfiling="YES" buildForArchiving="YES" buildForAnalyzing="YES">
+      <BuildableReference BuildableIdentifier="primary" BlueprintIdentifier="%s" BuildableName="LC Repeater.app" BlueprintName="LCRepeaterMac" ReferencedContainer="container:LCRepeater.xcodeproj"/>
+    </BuildActionEntry>
+  </BuildActionEntries></BuildAction>
+  <TestAction buildConfiguration="Debug" selectedDebuggerIdentifier="Xcode.DebuggerFoundation.Debugger.LLDB" selectedLauncherIdentifier="Xcode.IDEFoundation.Launcher.LLDB" shouldUseLaunchSchemeArgsEnv="YES"><Testables/></TestAction>
+  <LaunchAction buildConfiguration="Debug" selectedDebuggerIdentifier="Xcode.DebuggerFoundation.Debugger.LLDB" selectedLauncherIdentifier="Xcode.IDEFoundation.Launcher.LLDB" launchStyle="0" useCustomWorkingDirectory="NO" ignoresPersistentStateOnLaunch="NO" debugDocumentVersioning="YES" debugServiceExtension="internal" allowLocationSimulation="YES">
+    <BuildableProductRunnable runnableDebuggingMode="0"><BuildableReference BuildableIdentifier="primary" BlueprintIdentifier="%s" BuildableName="LC Repeater.app" BlueprintName="LCRepeaterMac" ReferencedContainer="container:LCRepeater.xcodeproj"/></BuildableProductRunnable>
+  </LaunchAction>
+  <ProfileAction buildConfiguration="Release" shouldUseLaunchSchemeArgsEnv="YES" savedToolIdentifier="" useCustomWorkingDirectory="NO" debugDocumentVersioning="YES"/>
+  <AnalyzeAction buildConfiguration="Debug"/>
+  <ArchiveAction buildConfiguration="Release" revealArchiveInOrganizer="YES"/>
+</Scheme>
+''' % (ident('mac:target'), ident('mac:target'))
     return {PROJECT / 'project.pbxproj': text,
-            PROJECT / 'xcshareddata/xcschemes/LCRepeater.xcscheme': scheme}
+            PROJECT / 'xcshareddata/xcschemes/LCRepeater.xcscheme': scheme,
+            PROJECT / 'xcshareddata/xcschemes/LCRepeaterMac.xcscheme': mac_scheme}
 
 
 if __name__ == '__main__':

@@ -86,6 +86,25 @@ final class LessonCoreTests: XCTestCase {
                        Set(["master.wav", "lesson.json"]))
     }
 
+    func testPackedLessonUnpacksIdenticallyAndReplacesExistingFile() throws {
+        let audioURL = folder.appendingPathComponent("master.wav")
+        try wav().write(to: audioURL)
+        var lesson = sample()
+        lesson.lang = "ja"
+        lesson.sentences[1].en = "こんにちは。"
+        let destination = folder.appendingPathComponent("mac.lcrlesson")
+        try Data("old".utf8).write(to: destination)
+        try LessonArchive.pack(lesson: lesson, audio: audioURL, to: destination)
+        let unpacked = try LessonArchive.unpack(from: destination, into: folder.appendingPathComponent("in"))
+        XCTAssertEqual(unpacked, lesson)
+        XCTAssertEqual(try Data(contentsOf: folder.appendingPathComponent("in/master.wav")), try Data(contentsOf: audioURL))
+        XCTAssertEqual(try FileManager.default.contentsOfDirectory(atPath: folder.path).filter { $0.hasSuffix(".part") }, [])
+        let mismatched = Lesson(id: lesson.id, title: lesson.title, duration: 5, created: lesson.created,
+                                sentences: lesson.sentences)
+        XCTAssertThrowsError(try LessonArchive.pack(lesson: mismatched, audio: audioURL, to: destination))
+        XCTAssertEqual(try LessonArchive.unpack(from: destination, into: folder.appendingPathComponent("again")), lesson)
+    }
+
     func testRepeatCountAndNoGapAfterFinalRepetition() {
         var settings = StudySettings()
         settings.repetitions = 3
