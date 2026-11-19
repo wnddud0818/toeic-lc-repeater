@@ -82,14 +82,14 @@ class EngineCLITests(unittest.TestCase):
         self.assertEqual(proc.returncode, 1)
         self.assertEqual(events(proc.stdout)[-1]['code'], 'no_model')
 
-    def test_translate_without_claude_is_not_logged_in_and_leaves_file(self):
+    def test_translate_when_claude_is_logged_out_is_a_coded_error_and_leaves_file(self):
+        fake_claude = self.root / 'claude'
+        fake_claude.write_text('#!/bin/sh\ncat >/dev/null\n'
+                               'echo \'{"is_error": true, "result": "Not logged in · Please run /login"}\'\nexit 1\n')
+        fake_claude.chmod(0o755)
         lesson_path = self.root / 'src' / 'lesson.json'
         before = lesson_path.read_bytes()
-        empty_path = self.root / 'empty'
-        empty_path.mkdir()
-        proc = self.run_cli('translate', str(lesson_path),
-                            env={'CLAUDE_BIN': '', 'PATH': str(empty_path), 'SHELL': '/bin/false',
-                                 'HOME': str(empty_path)})
+        proc = self.run_cli('translate', str(lesson_path), env={'CLAUDE_BIN': str(fake_claude)})
         self.assertEqual(proc.returncode, 1, proc.stdout + proc.stderr)
         self.assertEqual(events(proc.stdout)[-1]['code'], 'not_logged_in')
         self.assertEqual(lesson_path.read_bytes(), before)
