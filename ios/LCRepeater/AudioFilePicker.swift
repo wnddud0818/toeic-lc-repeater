@@ -8,16 +8,19 @@ import UniformTypeIdentifiers
 struct AudioFilePicker: UIViewControllerRepresentable {
     @Binding var isPresented: Bool
     var initialDirectory: URL? = nil
-    let onSelection: (URL?) -> Void
+    var allowsMultipleSelection = false
+    /// Empty when cancelled.
+    let onSelection: ([URL]) -> Void
 
     func makeUIViewController(context: Context) -> Presenter { Presenter() }
 
     func updateUIViewController(_ controller: Presenter, context: Context) {
-        controller.onSelection = { url in
+        controller.onSelection = { urls in
             isPresented = false
-            onSelection(url)
+            onSelection(urls)
         }
         controller.initialDirectory = initialDirectory
+        controller.allowsMultipleSelection = allowsMultipleSelection
         controller.requestPresentation(isPresented)
     }
 
@@ -26,8 +29,9 @@ struct AudioFilePicker: UIViewControllerRepresentable {
     }
 
     final class Presenter: UIViewController, UIDocumentPickerDelegate, UIAdaptivePresentationControllerDelegate {
-        var onSelection: ((URL?) -> Void)?
+        var onSelection: (([URL]) -> Void)?
         var initialDirectory: URL?
+        var allowsMultipleSelection = false
         private var requested = false
         private var finishing = false
         private var picker: UIDocumentPickerViewController?
@@ -40,13 +44,13 @@ struct AudioFilePicker: UIViewControllerRepresentable {
         func requestPresentation(_ value: Bool) {
             requested = value
             if value { showIfReady() }
-            else if picker != nil, !finishing { finish(nil) }
+            else if picker != nil, !finishing { finish([]) }
         }
 
         private func showIfReady() {
             guard requested, picker == nil, !finishing, viewIfLoaded?.window != nil else { return }
             let picker = UIDocumentPickerViewController(forOpeningContentTypes: [.audio], asCopy: true)
-            picker.allowsMultipleSelection = false
+            picker.allowsMultipleSelection = allowsMultipleSelection
             picker.shouldShowFileExtensions = true
             picker.directoryURL = initialDirectory
             picker.modalPresentationStyle = .formSheet
@@ -60,22 +64,22 @@ struct AudioFilePicker: UIViewControllerRepresentable {
             #if DEBUG
             print("Audio picker selection callback: \(urls.count) file(s)")
             #endif
-            finish(urls.first)
+            finish(urls)
         }
 
-        func documentPickerWasCancelled(_ controller: UIDocumentPickerViewController) { finish(nil) }
+        func documentPickerWasCancelled(_ controller: UIDocumentPickerViewController) { finish([]) }
 
         func presentationControllerDidDismiss(_ presentationController: UIPresentationController) {
-            finish(nil)
+            finish([])
         }
 
-        private func finish(_ url: URL?) {
+        private func finish(_ urls: [URL]) {
             guard !finishing, let picker else { return }
             finishing = true
             requested = false
             let completion = {
                 self.picker = nil
-                self.onSelection?(url)
+                self.onSelection?(urls)
                 self.finishing = false
             }
             if picker.presentingViewController != nil { picker.dismiss(animated: true, completion: completion) }

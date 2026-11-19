@@ -5,14 +5,18 @@ struct LibraryEntry: Codable, Identifiable, Equatable, Sendable {
     let id: UUID
     let importedAt: Date
     var lesson: Lesson
+    /// nil = not in a folder (and every lesson saved before folders existed).
+    var folderID: UUID? = nil
 }
 
 @MainActor
 final class LessonLibrary: ObservableObject {
     @Published private(set) var entries: [LibraryEntry] = []
+    @Published private(set) var folders: [LessonFolder] = []
     @Published private(set) var isImporting = false
     @Published var error: String?
     private let root: URL
+    private var foldersURL: URL { root.appendingPathComponent("folders.json") }
 
     init() {
         let support = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first
@@ -34,8 +38,17 @@ final class LessonLibrary: ObservableObject {
                 else { return nil }
                 return entry
             }.sorted { $0.importedAt > $1.importedAt }
+            if let data = try? Data(contentsOf: foldersURL),
+               let saved = try? JSONDecoder().decode([LessonFolder].self, from: data) {
+                folders = LessonFolders.sorted(saved)
+            }
+            // A lesson whose folder no longer exists shows up as "not in a folder".
+            let known = Set(folders.map(\.id))
+            for index in entries.indices where entries[index].folderID.map({ !known.contains($0) }) == true {
+                entries[index].folderID = nil
+            }
             #if os(iOS)
-            // Shown in the Files app (UIFileSharingEnabled) as a place to drop .lcrlesson files.
+            // Shown in the Files app (UIFileSharingEnabled) as a place to drop lesson files.
             let documents = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask).first
             if let documents {
                 try FileManager.default.createDirectory(
@@ -59,21 +72,21 @@ final class LessonLibrary: ObservableObject {
         return folder
     }
 
-    func finishLocalLesson(_ lesson: Lesson, id: UUID, staging: URL) throws -> LibraryEntry {
+    func finishLocalLesson(_ lesson: Lesson, id: UUID, staging: URL, folderID: UUID? = nil) throws -> LibraryEntry {
         // URL equality includes the directory/trailing-slash hint; compare path
         // components so the same folder stays valid before and after creation.
         guard staging.standardizedFileURL.pathComponents == root.appendingPathComponent(".import-" + id.uuidString, isDirectory: true).standardizedFileURL.pathComponents,
               FileManager.default.fileExists(atPath: staging.appendingPathComponent("master.wav").path)
         else { throw LessonError.invalidAudio }
         try lesson.validate()
-        let entry = LibraryEntry(id: id, importedAt: Date(), lesson: lesson)
+        let entry = LibraryEntry(id: id, importedAt: Date(), lesson: lesson, folderID: knownFolder(folderID))
         try JSONEncoder().encode(entry).write(to: staging.appendingPathComponent("entry.json"), options: .atomic)
         try FileManager.default.moveItem(at: staging, to: root.appendingPathComponent(id.uuidString))
         entries.insert(entry, at: 0)
         return entry
     }
 
-    func importArchive(at url: URL) async {
+    func importArchive(at url: URL, folderID: UUID? = nil) async {
         guard !isImporting else {
             error = "다른 레슨을 가져오는 중이에요. 완료 후 다시 열어 주세요."
             return
@@ -99,7 +112,7 @@ final class LessonLibrary: ObservableObject {
                 guard let result else { throw LessonError.invalidArchive }
                 return try result.get()
             }.value
-            let entry = LibraryEntry(id: id, importedAt: Date(), lesson: lesson)
+            let entry = LibraryEntry(id: id, importedAt: Date(), lesson: lesson, folderID: knownFolder(folderID))
             try JSONEncoder().encode(entry).write(to: staging.appendingPathComponent("entry.json"), options: .atomic)
             try FileManager.default.moveItem(at: staging, to: root.appendingPathComponent(id.uuidString))
             entries.insert(entry, at: 0)
@@ -133,10 +146,64 @@ final class LessonLibrary: ObservableObject {
         entries[index] = entry
     }
 
-    /// Writes a .lcrlesson file that the iPhone app can import.
+    /// Writes a .lrlesson file that the iPhone app can import.
     func exportArchive(_ id: UUID, to destination: URL) throws {
         guard let entry = entry(for: id) else { throw LessonError.invalidLesson }
         try LessonArchive.pack(lesson: entry.lesson, audio: audioURL(for: id), to: destination)
+    }
+
+    // MARK: - Folders
+
+    func entries(in scope: LibraryScope) -> [LibraryEntry] {
+        entries.filter { scope.contains(folderID: $0.folderID) }
+    }
+
+    func folder(for id: UUID?) -> LessonFolder? {
+        guard let id else { return nil }
+        return folders.first { $0.id == id }
+    }
+
+    @discardableResult
+    func createFolder(named name: String) throws -> LessonFolder {
+        let folder = LessonFolder(id: UUID(), name: try LessonFolders.validatedName(name, among: folders), created: Date())
+        try saveFolders(folders + [folder])
+        return folder
+    }
+
+    func renameFolder(_ id: UUID, to name: String) throws {
+        guard let index = folders.firstIndex(where: { $0.id == id }) else { throw FolderError.missing }
+        var updated = folders
+        updated[index].name = try LessonFolders.validatedName(name, among: folders, excluding: id)
+        try saveFolders(updated)
+    }
+
+    /// Removes the folder only; its lessons stay in the library, outside any folder.
+    func deleteFolder(_ id: UUID) throws {
+        try move(entries.filter { $0.folderID == id }.map(\.id), to: nil)
+        try saveFolders(folders.filter { $0.id != id })
+    }
+
+    func move(_ ids: [UUID], to folderID: UUID?) throws {
+        if let folderID, folder(for: folderID) == nil { throw FolderError.missing }
+        for id in ids {
+            guard let index = entries.firstIndex(where: { $0.id == id }), entries[index].folderID != folderID else { continue }
+            var entry = entries[index]
+            entry.folderID = folderID
+            try write(entry)
+            entries[index] = entry
+        }
+    }
+
+    private func knownFolder(_ id: UUID?) -> UUID? { folder(for: id)?.id }
+
+    private func saveFolders(_ updated: [LessonFolder]) throws {
+        try JSONEncoder().encode(updated).write(to: foldersURL, options: .atomic)
+        folders = LessonFolders.sorted(updated)
+    }
+
+    private func write(_ entry: LibraryEntry) throws {
+        try JSONEncoder().encode(entry).write(
+            to: root.appendingPathComponent(entry.id.uuidString).appendingPathComponent("entry.json"), options: .atomic)
     }
 
     func delete(_ id: UUID) {

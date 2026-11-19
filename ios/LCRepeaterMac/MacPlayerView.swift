@@ -46,7 +46,8 @@ struct MacPlayerView: View {
         }
         .background(Color(nsColor: .windowBackgroundColor))
         .navigationTitle(entry.lesson.title)
-        .navigationSubtitle("\(language.name) · \(entry.lesson.sentences.count)문장")
+        .navigationSubtitle([library.folder(for: entry.folderID)?.name, language.name,
+                             "\(entry.lesson.sentences.count)문장"].compactMap { $0 }.joined(separator: " · "))
         .toolbar {
             ToolbarItemGroup(placement: .primaryAction) {
                 Menu {
@@ -60,7 +61,7 @@ struct MacPlayerView: View {
                 Button("아이폰용으로 내보내기", systemImage: "square.and.arrow.up") {
                     state.export(entry, library: library)
                 }
-                .help("아이폰 앱에서 가져올 .lcrlesson 파일로 저장 (⌘E)")
+                .help("아이폰 앱에서 가져올 .lrlesson 파일로 저장 (⌘E)")
                 Button("문장 목록", systemImage: "sidebar.right") { showingList.toggle() }
                     .help("문장 목록 보기/숨기기")
             }

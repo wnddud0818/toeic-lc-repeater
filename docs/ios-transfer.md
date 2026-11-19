@@ -8,7 +8,7 @@ PC에서 처리한 레슨을 가져오는 경로를 유지한다. 앱 시작 화
 | 대상 | 전달 경로 | 이유 |
 |---|---|---|
 | 아이폰 앱 | macOS/Xcode 또는 GitHub Actions → unsigned IPA → Feather에서 서명·설치 | 판매자에게 앱 소스·음원·계정 정보를 전달할 필요가 없다. |
-| 레슨 | PC에서 `.lcrlesson` 내보내기 → AirDrop/iCloud Drive/파일 공유 → 앱에서 가져오기 | 서버 주소·로그인·상시 실행 중인 맥 없이 사용한다. |
+| 레슨 | PC에서 `.lrlesson` 내보내기 → AirDrop/iCloud Drive/파일 공유 → 앱에서 가져오기 | 서버 주소·로그인·상시 실행 중인 맥 없이 사용한다. |
 | 향후 선택지 | 같은 와이파이에서 레슨 다운로드, 클라우드 동기화 | 필요하면 추가할 수 있지만 첫 버전에는 계정·서버·네트워크 권한을 요구하지 않는다. |
 
 ‘PC에서 만들기’는 현재 지원되는 맥 파이프라인으로 레슨을 처리한다는 뜻이다. **내보내기 도구 자체는 Python 표준 라이브러리만 사용**하므로 처리된 폴더가 있으면 Windows/Linux에서도 실행할 수 있다. SwiftUI 앱의 컴파일에는 macOS/Xcode가 필요하다. Windows PC에서도 GitHub Actions의 macOS 빌드 결과를 내려받을 수 있다.
@@ -16,7 +16,7 @@ PC에서 처리한 레슨을 가져오는 경로를 유지한다. 앱 시작 화
 ## 레슨 옮기기
 
 1. 업데이트한 맥 앱/웹 플레이어에서 처리가 끝난 레슨을 연다.
-2. **아이폰용 레슨 내보내기**를 눌러 `.lcrlesson` 파일을 저장한다.
+2. **아이폰용 레슨 내보내기**를 눌러 `.lrlesson` 파일을 저장한다.
 3. Mac이면 AirDrop 또는 iCloud Drive, 다른 PC면 iCloud Drive 등으로 아이폰 ‘파일’ 앱에 전달한다.
 4. 아이폰 LC Repeater의 **가져오기**에서 파일을 고른다. 파일의 공유/열기 메뉴로 앱에 전달해도 된다.
 5. 가져오기가 끝나면 원본 PC 연결 없이 학습한다. 가져오는 동안에는 앱을 열어 둔다.
@@ -24,12 +24,12 @@ PC에서 처리한 레슨을 가져오는 경로를 유지한다. 앱 시작 화
 기존 데이터 폴더를 직접 내보낼 수도 있다.
 
 ```bash
-python3 export_lesson.py "data/<레슨-id>" -o "output/lesson.lcrlesson"
+python3 export_lesson.py "data/<레슨-id>" -o "output/lesson.lrlesson"
 
 # 기존 맥 앱 데이터는 이 경로에 있다.
 python3 export_lesson.py \
   "$HOME/Library/Application Support/LC Repeater/data/<레슨-id>" \
-  -o "output/lesson.lcrlesson"
+  -o "output/lesson.lrlesson"
 ```
 
 내보내기는 `lesson.json`, `master.wav`, 완료 상태만 읽는다. 모델·Claude 로그인·원본 MP3는 필요하지 않다. 번역이 실패한 완료 레슨도 영어와 빈 번역으로 내보낼 수 있다.
@@ -85,7 +85,7 @@ Feather 자체의 최초 설치와 인증서 구매는 이 저장소가 수행�
 
 반복과 쉼은 `AVAudioPlayerNode`에 미리 예약한 PCM 버퍼로 재생한다. `AVAudioUnitTimePitch`로 속도를 바꾸고, 명시적 쉼 시간은 배속과 무관하게 유지한다. 메인 타이머는 화면 진행률 갱신에만 사용한다. 기기별 잠금/전화/Bluetooth 동작은 아래 실기기 점검을 거친다.
 
-아이폰에서 고친 구간은 로컬 데이터다. PC와 동기화하거나 PC에 되돌려 보내는 기능은 첫 버전에 없다. 같은 레슨을 다시 가져오면 기존 항목을 덮어쓰지 않고 별도 항목으로 추가한다. 앱 삭제 시 앱 내부 레슨·설정도 지워지므로 `.lcrlesson` 원본은 보관한다.
+아이폰에서 고친 구간은 로컬 데이터다. PC와 동기화하거나 PC에 되돌려 보내는 기능은 첫 버전에 없다. 같은 레슨을 다시 가져오면 기존 항목을 덮어쓰지 않고 별도 항목으로 추가한다. 앱 삭제 시 앱 내부 레슨·설정도 지워지므로 `.lrlesson` 원본은 보관한다.
 
 ## 파일 형식 v1
 
@@ -115,6 +115,8 @@ manifest 예시:
 }
 ```
 
+확장자는 `.lrlesson`이다. 예전에 저장한 `.lcrlesson`도 내용이 같아서 그대로 가져올 수 있다. manifest의 `format` 값(`toeic-lc-repeater.lesson`)은 이전 앱과의 호환을 위해 바꾸지 않았다.
+
 `lang`은 원문 언어(`en` 또는 `ja`)다. 없으면 영어로 본다(예전 레슨). 언어와 상관없이 원문은 `en`, 번역은 `ko` 필드에 둔다. 예전 앱은 모르는 `lang`을 무시하므로 일본어 레슨도 열 수 있다(표시만 EN으로 나온다).
 
 가져올 때 전체 길이·버전·문장 ID·구간·음원 형식·음원 길이·SHA-256을 확인한다. SHA-256은 전달 중 손상 검사이며 제작자 인증은 아니다. 외부 ID나 파일명을 저장 경로에 사용하지 않고 앱이 생성한 UUID 폴더에 저장한다. 완료 전 임시 폴더에서 검증하고, 성공 후에만 보관함에 추가한다.
@@ -124,8 +126,8 @@ manifest 예시:
 ```bash
 python3 -m unittest discover -s tests -v
 python3 scripts/generate_ios_project.py --check
-python3 tests/make_fixture.py /tmp/contract.lcrlesson
-LCR_TEST_FIXTURE=/tmp/contract.lcrlesson swift test --package-path ios
+python3 tests/make_fixture.py /tmp/contract.lrlesson
+LCR_TEST_FIXTURE=/tmp/contract.lrlesson swift test --package-path ios
 ```
 
 실기기에서는 실제 교재 음원으로 다음을 확인해야 한다. 저장소/CI에는 교재 음원과 개인 인증서를 올리지 않는다.

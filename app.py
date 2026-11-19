@@ -43,7 +43,7 @@ def main():
     import server
     import webview
 
-    # Lesson export links download a .lcrlesson document from the local server.
+    # Lesson export links download a .lrlesson document from the local server.
     webview.settings['ALLOW_DOWNLOADS'] = True
 
     server.start_worker()

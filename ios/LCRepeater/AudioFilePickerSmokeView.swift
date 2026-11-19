@@ -14,8 +14,8 @@ struct AudioFilePickerSmokeView: View {
             Text(result).accessibilityIdentifier("picker-smoke.result")
         }
         .background {
-            AudioFilePicker(isPresented: $showingPicker, initialDirectory: documents) { url in
-                guard let url else { return }
+            AudioFilePicker(isPresented: $showingPicker, initialDirectory: documents) { urls in
+                guard let url = urls.first else { return }
                 Task { await verify(url) }
             }.frame(width: 0, height: 0)
         }

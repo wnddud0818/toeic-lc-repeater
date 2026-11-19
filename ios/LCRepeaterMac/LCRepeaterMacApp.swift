@@ -32,7 +32,7 @@ struct LCRepeaterMacApp: App {
 final class AppDelegate: NSObject, NSApplicationDelegate {
     func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool { true }
 
-    /// .lcrlesson files and audio opened from Finder, the Dock or "Open With".
+    /// Lesson files and audio opened from Finder, the Dock or "Open With".
     func application(_ application: NSApplication, open urls: [URL]) {
         MainActor.assumeIsolated { MacAppState.shared.open(urls) }
     }
@@ -43,7 +43,7 @@ struct LessonCommands: Commands {
     @ObservedObject var library: LessonLibrary
     @ObservedObject var player: RepeaterPlayer
 
-    private var selected: LibraryEntry? { state.selectedLessonID.flatMap(library.entry(for:)) }
+    private var selected: [LibraryEntry] { library.entries.filter { state.selection.contains($0.id) } }
 
     var body: some Commands {
         CommandGroup(replacing: .newItem) {
@@ -52,9 +52,14 @@ struct LessonCommands: Commands {
             Button("레슨 파일 가져오기…") { state.showingImporter = true }
                 .keyboardShortcut("o")
             Divider()
-            Button("아이폰용으로 내보내기…") { if let selected { state.export(selected, library: library) } }
-                .keyboardShortcut("e")
-                .disabled(selected == nil)
+            Button("새 폴더…") { state.promptNewFolder() }
+                .keyboardShortcut("n", modifiers: [.command, .shift])
+            Divider()
+            Button(selected.count > 1 ? "레슨 \(selected.count)개 내보내기…" : "아이폰용으로 내보내기…") {
+                state.export(selected, library: library)
+            }
+            .keyboardShortcut("e")
+            .disabled(selected.isEmpty)
             Button("이전 맥 앱 레슨 가져오기…") { Task { await state.importPreviousAppLessons(into: library) } }
         }
         CommandMenu("재생") {

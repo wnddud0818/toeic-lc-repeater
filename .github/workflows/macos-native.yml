@@ -65,8 +65,8 @@ jobs:
         run: python3 -m unittest discover -s tests -v
       - name: Swift lesson core tests
         run: |
-          python3 tests/make_fixture.py "$RUNNER_TEMP/contract.lcrlesson"
-          LCR_TEST_FIXTURE="$RUNNER_TEMP/contract.lcrlesson" swift test --package-path ios
+          python3 tests/make_fixture.py "$RUNNER_TEMP/contract.lrlesson"
+          LCR_TEST_FIXTURE="$RUNNER_TEMP/contract.lrlesson" swift test --package-path ios
       - name: Build iPhone app with the shared sources
         # main and pull requests build the iPhone app in ios.yml; branch pushes check it here.
         if: startsWith(github.ref, 'refs/heads/claude/')
@@ -103,15 +103,21 @@ jobs:
               print('%6.2f-%6.2f  %s' % (s['start'], s['end'], s['en']))
           PY
           }
+          engine() {
+            local out=$1; shift
+            if ! LCR_WHISPER_DTW=tiny "$APP/Contents/Helpers/lcr-engine" --model "$RUNNER_TEMP/ggml-tiny.bin" "$@" > "$out"; then
+              echo "::error::engine failed: $*"; cat "$out"; return 1
+            fi
+          }
           say -o "$RUNNER_TEMP/en.aiff" "Would you like a window seat? Yes, please. The meeting starts at three."
-          LCR_WHISPER_DTW=tiny "$APP/Contents/Helpers/lcr-engine" --model "$RUNNER_TEMP/ggml-tiny.bin" \
-            transcribe "$RUNNER_TEMP/en.aiff" --lang en --work "$RUNNER_TEMP/work-en" > "$RUNNER_TEMP/en.jsonl"
+          engine "$RUNNER_TEMP/en.jsonl" transcribe "$RUNNER_TEMP/en.aiff" --lang en --work "$RUNNER_TEMP/work-en"
           check "$RUNNER_TEMP/en.jsonl" en
+          say -v '?' | grep -i 'ja_JP' || true
           LCR_JA_VOICE=$(say -v '?' | awk '/ja_JP/ {print $1; exit}')
           if [ -n "$LCR_JA_VOICE" ]; then
             say -v "$LCR_JA_VOICE" -o "$RUNNER_TEMP/ja.aiff" "すみません、駅はどこですか。まっすぐ行ってください。"
-            LCR_WHISPER_DTW=tiny "$APP/Contents/Helpers/lcr-engine" --model "$RUNNER_TEMP/ggml-tiny.bin" \
-              transcribe "$RUNNER_TEMP/ja.aiff" --lang ja --work "$RUNNER_TEMP/work-ja" > "$RUNNER_TEMP/ja.jsonl"
+            ls -l "$RUNNER_TEMP/ja.aiff"
+            engine "$RUNNER_TEMP/ja.jsonl" transcribe "$RUNNER_TEMP/ja.aiff" --lang ja --work "$RUNNER_TEMP/work-ja"
             check "$RUNNER_TEMP/ja.jsonl" ja
           else
             echo "No Japanese voice on this runner; skipped the Japanese check."

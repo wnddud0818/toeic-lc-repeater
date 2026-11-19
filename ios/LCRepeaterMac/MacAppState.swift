@@ -24,10 +24,21 @@ enum CardFace: Equatable {
 final class MacAppState: ObservableObject {
     static let shared = MacAppState()
 
-    @Published var selectedLessonID: UUID?
+    /// Folder (or all/unfiled) shown in the lesson list. Remembered between launches.
+    @Published var scope: LibraryScope = LibraryScope(rawValue: UserDefaults.standard.string(forKey: "mac.scope") ?? "") ?? .all {
+        didSet { UserDefaults.standard.set(scope.rawValue, forKey: "mac.scope") }
+    }
+    /// Lessons selected in the list. The player opens when exactly one is selected.
+    @Published var selection: Set<UUID> = []
+    var selectedLessonID: UUID? { selection.count == 1 ? selection.first : nil }
     @Published var showingNewLesson = false
-    @Published var newLessonAudio: URL?
+    /// Audio files waiting to be added to the new-lesson queue (opened, dropped or chosen).
+    @Published var newLessonAudio: [URL] = []
     @Published var showingImporter = false
+    @Published var folderPrompt: FolderPrompt?
+    @Published var folderName = ""
+    @Published var deletingFolder: LessonFolder?
+    @Published var deletingLessons: [LibraryEntry] = []
     @Published var cardFace = CardFace.hidden
     @Published var message: String?
     /// Files opened from Finder, the Dock or by dragging; handled by the main window.
@@ -36,18 +47,113 @@ final class MacAppState: ObservableObject {
 
     func open(_ urls: [URL]) { openRequests.append(contentsOf: urls) }
 
-    func startNewLesson(with audio: URL? = nil) {
-        newLessonAudio = audio
+    func startNewLesson(with audio: [URL] = []) {
+        newLessonAudio.append(contentsOf: audio)
         showingNewLesson = true
     }
 
-    /// Saves a .lcrlesson for the iPhone app and shows it in Finder (ready for AirDrop).
+    func select(_ id: UUID) { selection = [id] }
+
+    // MARK: - Folders
+
+    enum FolderPrompt: Equatable {
+        case create(moving: [UUID])
+        case rename(LessonFolder)
+    }
+
+    func promptNewFolder(moving ids: [UUID] = []) {
+        folderName = ""
+        folderPrompt = .create(moving: ids)
+    }
+
+    func promptRename(_ folder: LessonFolder) {
+        folderName = folder.name
+        folderPrompt = .rename(folder)
+    }
+
+    func commitFolderPrompt(library: LessonLibrary) {
+        guard let prompt = folderPrompt else { return }
+        folderPrompt = nil
+        do {
+            switch prompt {
+            case .create(let ids):
+                let folder = try library.createFolder(named: folderName)
+                if !ids.isEmpty { try library.move(ids, to: folder.id) }
+                scope = .folder(folder.id)
+            case .rename(let folder):
+                try library.renameFolder(folder.id, to: folderName)
+            }
+        } catch {
+            message = error.localizedDescription
+        }
+    }
+
+    func move(_ ids: [UUID], to folderID: UUID?, library: LessonLibrary) {
+        do { try library.move(ids, to: folderID) }
+        catch { message = "옮기지 못했어요: \(error.localizedDescription)" }
+    }
+
+    func deleteFolder(_ folder: LessonFolder, library: LessonLibrary) {
+        do {
+            try library.deleteFolder(folder.id)
+            if scope == .folder(folder.id) { scope = .unfiled }
+        } catch {
+            message = "폴더를 삭제하지 못했어요: \(error.localizedDescription)"
+        }
+    }
+
+    // MARK: - Export
+
+    /// One lesson: asks where to save it. Several: asks for a folder and saves each one there.
+    /// Shows the result in Finder, ready for AirDrop to the iPhone.
+    func export(_ entries: [LibraryEntry], library: LessonLibrary) {
+        if entries.count == 1, let entry = entries.first { export(entry, library: library); return }
+        guard !entries.isEmpty else { return }
+        let panel = NSOpenPanel()
+        panel.canChooseDirectories = true
+        panel.canChooseFiles = false
+        panel.canCreateDirectories = true
+        panel.prompt = "여기에 내보내기"
+        panel.message = "레슨 \(entries.count)개를 아이폰용 .\(LessonArchive.fileExtension) 파일로 저장할 폴더를 고르세요."
+        guard panel.runModal() == .OK, let directory = panel.url else { return }
+        var written: [URL] = []
+        var failed: [String] = []
+        for entry in entries {
+            let url = Self.uniqueURL(in: directory, title: entry.lesson.title)
+            do {
+                try library.exportArchive(entry.id, to: url)
+                written.append(url)
+            } catch {
+                failed.append(entry.lesson.title)
+            }
+        }
+        if !written.isEmpty { NSWorkspace.shared.activateFileViewerSelecting(written) }
+        if !failed.isEmpty { message = "내보내지 못한 레슨: " + failed.joined(separator: ", ") }
+    }
+
+    private static func safeName(_ title: String) -> String {
+        let cleaned = title.replacingOccurrences(of: "/", with: "-").replacingOccurrences(of: ":", with: "-")
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        return cleaned.isEmpty ? "레슨" : cleaned
+    }
+
+    private static func uniqueURL(in directory: URL, title: String) -> URL {
+        let base = safeName(title)
+        var url = directory.appendingPathComponent(base).appendingPathExtension(LessonArchive.fileExtension)
+        var number = 2
+        while FileManager.default.fileExists(atPath: url.path) {
+            url = directory.appendingPathComponent("\(base) \(number)").appendingPathExtension(LessonArchive.fileExtension)
+            number += 1
+        }
+        return url
+    }
+
+    /// Saves a .lrlesson for the iPhone app and shows it in Finder (ready for AirDrop).
     func export(_ entry: LibraryEntry, library: LessonLibrary) {
         let panel = NSSavePanel()
         panel.allowedContentTypes = [.lcrLesson]
         panel.canCreateDirectories = true
-        let safe = entry.lesson.title.replacingOccurrences(of: "/", with: "-").replacingOccurrences(of: ":", with: "-")
-        panel.nameFieldStringValue = (safe.isEmpty ? "레슨" : safe) + ".lcrlesson"
+        panel.nameFieldStringValue = Self.safeName(entry.lesson.title) + "." + LessonArchive.fileExtension
         panel.message = "아이폰으로 옮길 레슨 파일을 저장해요. AirDrop이나 iCloud Drive로 보내 주세요."
         guard panel.runModal() == .OK, let url = panel.url else { return }
         do {
@@ -73,7 +179,7 @@ final class MacAppState: ObservableObject {
                   let lesson = try? JSONDecoder().decode(Lesson.self, from: json) else { continue }
             if UserDefaults.standard.bool(forKey: key) { already += 1; continue }
             let audio = folder.appendingPathComponent("master.wav")
-            let archive = FileManager.default.temporaryDirectory.appendingPathComponent("\(UUID().uuidString).lcrlesson")
+            let archive = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString + "." + LessonArchive.fileExtension)
             defer { try? FileManager.default.removeItem(at: archive) }
             do {
                 // Packing validates the lesson and the WAV format, exactly like a file from the PC app.

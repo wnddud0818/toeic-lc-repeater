@@ -2,25 +2,29 @@ import SwiftUI
 import Translation
 import UniformTypeIdentifiers
 
+/// Makes lessons from one or more audio files with the same language, transcriber, translator and folder.
 struct MacNewLessonView: View {
-    let initialAudio: URL?
-    let onComplete: (UUID) -> Void
+    /// Files opened or dropped elsewhere; moved into the queue as they arrive.
+    @Binding var incoming: [URL]
+    let initialFolderID: UUID?
+    let onComplete: ([UUID], UUID?) -> Void
     @EnvironmentObject private var library: LessonLibrary
     @EnvironmentObject private var engine: EngineStatus
     @Environment(\.dismiss) private var dismiss
-    @StateObject private var builder = LessonBuilder()
+    @StateObject private var queue = LessonQueue()
     @AppStorage("mac.language") private var language = StudyLanguage.english
     @AppStorage("mac.transcription") private var transcription = TranscriptionChoice.apple
     @AppStorage("mac.translation") private var translation = TranslationChoice.apple
+    @State private var folderID: UUID?
     @State private var showingPicker = false
     @State private var dropTargeted = false
     @State private var configuration: TranslationSession.Configuration?
     @State private var configurationLanguage: StudyLanguage?
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 18) {
+        VStack(alignment: .leading, spacing: 16) {
             Text("새 레슨 만들기").font(.title2.bold())
-            sourcePicker
+            fileList
             Form {
                 Picker("음원 언어", selection: $language) {
                     ForEach(StudyLanguage.allCases) { Text($0.name).tag($0) }
@@ -36,69 +40,107 @@ struct MacNewLessonView: View {
                 }
                 .pickerStyle(.radioGroup)
                 Text(translation.detail).font(.caption).foregroundStyle(.secondary)
+                Picker("저장할 폴더", selection: $folderID) {
+                    Text("폴더 없음").tag(UUID?.none)
+                    ForEach(library.folders) { Text($0.name).tag(UUID?.some($0.id)) }
+                }
             }
             .formStyle(.grouped)
-            .disabled(builder.isBusy)
+            .disabled(queue.isRunning)
             notices
-            if builder.sourceURL != nil || builder.isBusy || builder.error != nil { progressArea }
             buttons
         }
         .padding(24)
-        .frame(width: 600)
-        .fileImporter(isPresented: $showingPicker, allowedContentTypes: [.audio]) { result in
-            if case .success(let url) = result { builder.select(url) }
+        .frame(width: 640)
+        .fileImporter(isPresented: $showingPicker, allowedContentTypes: [.audio], allowsMultipleSelection: true) { result in
+            if case .success(let urls) = result { add(urls) }
         }
         .translationTask(configuration) { session in
-            if let id = await builder.run(translation: .apple, session: session, library: library) {
-                onComplete(id)
-            }
+            await queue.run(translation: .apple, session: session, library: library, folderID: folderID)
+            finishIfDone()
         }
-        .onChange(of: language) { _, _ in configureBuilder() }
-        .onChange(of: transcription) { _, _ in configureBuilder() }
+        .onChange(of: language) { _, _ in configureQueue() }
+        .onChange(of: transcription) { _, _ in configureQueue() }
+        .onChange(of: incoming) { _, _ in takeIncoming() }
         .onAppear {
-            configureBuilder()
-            if let initialAudio { builder.select(initialAudio) }
+            folderID = library.folder(for: initialFolderID)?.id
+            takeIncoming()
         }
         .task { await engine.refresh() }
-        .onDisappear { builder.stopAndDiscard() }
-        .interactiveDismissDisabled(builder.isBusy)
+        .onDisappear {
+            queue.cancel()
+            queue.discardAll()
+        }
+        .interactiveDismissDisabled(queue.isRunning)
     }
 
-    // MARK: - Parts
+    // MARK: - Files
 
-    private var sourcePicker: some View {
-        HStack(spacing: 12) {
-            Image(systemName: "waveform").font(.title2).foregroundStyle(.tint)
-            VStack(alignment: .leading, spacing: 2) {
-                Text(builder.sourceURL?.lastPathComponent ?? "음원 파일을 고르거나 여기로 끌어다 놓으세요")
-                    .lineLimit(1).truncationMode(.middle)
-                Text("MP3 · M4A · WAV 등").font(.caption).foregroundStyle(.secondary)
+    private var fileList: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            if queue.items.isEmpty {
+                VStack(spacing: 8) {
+                    Image(systemName: "waveform.badge.plus").font(.largeTitle).foregroundStyle(.tint)
+                    Text("음원 파일을 여기로 끌어다 놓거나 골라 주세요")
+                    Text("MP3 · M4A · WAV 등 · 여러 개를 한꺼번에 넣으면 차례로 처리해요")
+                        .font(.caption).foregroundStyle(.secondary)
+                    Button("파일 선택…") { showingPicker = true }.padding(.top, 4)
+                }
+                .frame(maxWidth: .infinity).padding(.vertical, 22)
+            } else {
+                ScrollView {
+                    VStack(spacing: 0) {
+                        ForEach(queue.items) { item in
+                            QueueRow(item: item, builder: item.builder, canRemove: !queue.isRunning) {
+                                queue.remove(item)
+                            }
+                            Divider()
+                        }
+                    }
+                }
+                .frame(height: min(CGFloat(queue.items.count) * 58, 240))
+                HStack {
+                    Text(summary).font(.caption).foregroundStyle(.secondary)
+                    Spacer()
+                    if queue.items.contains(where: { $0.lessonID != nil }) && !queue.isRunning {
+                        Button("완료된 항목 지우기") { queue.clearFinished() }.controlSize(.small)
+                    }
+                    Button("파일 추가…") { showingPicker = true }.controlSize(.small).disabled(queue.isRunning)
+                }
+                .padding(10)
             }
-            Spacer()
-            Button(builder.sourceURL == nil ? "파일 선택…" : "다른 파일…") { showingPicker = true }
-                .disabled(builder.isBusy)
         }
-        .padding(14)
         .background(RoundedRectangle(cornerRadius: 12)
             .fill(dropTargeted ? Color.accentColor.opacity(0.12) : Color(nsColor: .controlBackgroundColor)))
         .overlay(RoundedRectangle(cornerRadius: 12)
             .strokeBorder(dropTargeted ? Color.accentColor : Color(nsColor: .separatorColor),
-                          style: StrokeStyle(lineWidth: 1, dash: builder.sourceURL == nil ? [5] : [])))
+                          style: StrokeStyle(lineWidth: 1, dash: queue.items.isEmpty ? [5] : [])))
+        .clipShape(RoundedRectangle(cornerRadius: 12))
         .dropDestination(for: URL.self) { urls, _ in
-            guard !builder.isBusy,
-                  let url = urls.first(where: { UTType(filenameExtension: $0.pathExtension)?.conforms(to: .audio) == true })
-            else { return false }
-            builder.select(url)
+            guard !queue.isRunning else { return false }
+            add(urls)
             return true
         } isTargeted: { dropTargeted = $0 }
     }
 
-    /// Problems that stop the chosen options from working, and softer warnings.
+    private var summary: String {
+        let done = queue.finishedIDs.count
+        var parts = ["파일 \(queue.items.count)개"]
+        if done > 0 { parts.append("완료 \(done)") }
+        if queue.failedCount > 0 { parts.append("실패 \(queue.failedCount)") }
+        return parts.joined(separator: " · ")
+    }
+
+    // MARK: - Notices
+
+    /// Problems that stop the chosen options from working.
     private var blockers: [String] {
         var result: [String] = []
         switch transcription {
         case .apple:
-            if engine.appleSpeech[language] == false { result.append(MacProcessingError.speechUnavailable(language).localizedDescription) }
+            if engine.appleSpeech[language] == false {
+                result.append(MacProcessingError.speechUnavailable(language).localizedDescription)
+            }
         case .whisper:
             if !engine.helperBundled { result.append(EngineError.missingHelper.message) }
         }
@@ -145,58 +187,60 @@ struct MacNewLessonView: View {
         }
     }
 
-    private var progressArea: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            Text(builder.status).font(.headline)
-            if builder.isBusy {
-                if let fraction = builder.progress { ProgressView(value: fraction) } else { ProgressView().progressViewStyle(.linear) }
-            }
-            if builder.sentenceCount > 0 {
-                Text("\(builder.sentenceCount)문장").font(.caption).foregroundStyle(.secondary)
-            }
-            if let error = builder.error {
-                Text(error).foregroundStyle(.red).textSelection(.enabled)
-            }
-        }
-    }
+    // MARK: - Buttons
 
     private var buttons: some View {
         HStack {
-            if builder.isBusy {
+            if queue.isRunning {
                 Text("처리하는 동안 이 창을 열어 두세요.").font(.caption).foregroundStyle(.secondary)
                 Spacer()
-                Button("처리 취소", role: .cancel) { builder.cancel() }
+                Button("처리 중지", role: .cancel) { queue.cancel() }
             } else {
-                Button("닫기") { builder.discard(); dismiss() }
-                    .keyboardShortcut(.cancelAction)
-                Spacer()
-                if builder.hasDraft {
-                    Button("번역 없이 저장") {
-                        if let id = builder.saveWithoutTranslation(library: library) { onComplete(id) }
-                    }
-                    Button("번역 다시 시도") { start() }
-                        .keyboardShortcut(.defaultAction)
-                        .disabled(!blockers.isEmpty)
-                } else {
-                    Button("만들기") { start() }
-                        .keyboardShortcut(.defaultAction)
-                        .disabled(builder.sourceURL == nil || !blockers.isEmpty || needsModel)
+                Button("닫기") {
+                    let ids = queue.finishedIDs
+                    queue.discardAll()
+                    if ids.isEmpty { dismiss() } else { onComplete(ids, folderID) }
                 }
+                .keyboardShortcut(.cancelAction)
+                Spacer()
+                if !queue.draftsAwaitingTranslation.isEmpty {
+                    Button("번역 없이 저장 (\(queue.draftsAwaitingTranslation.count))") {
+                        queue.saveDraftsWithoutTranslation(library: library, folderID: folderID)
+                        finishIfDone()
+                    }
+                }
+                let remaining = queue.remaining.count
+                Button(queue.failedCount > 0 && queue.failedCount == remaining
+                       ? "실패한 파일 다시 시도" : remaining > 1 ? "레슨 \(remaining)개 만들기" : "만들기") { start() }
+                    .keyboardShortcut(.defaultAction)
+                    .disabled(remaining == 0 || !blockers.isEmpty || needsModel)
             }
         }
     }
 
     // MARK: - Actions
 
-    private func configureBuilder() {
-        builder.configure(language: language, transcription: transcription)
+    private func add(_ urls: [URL]) {
+        let audio = urls.filter { UTType(filenameExtension: $0.pathExtension)?.conforms(to: .audio) == true }
+        queue.add(audio, language: language, transcription: transcription)
+    }
+
+    private func takeIncoming() {
+        guard !incoming.isEmpty, !queue.isRunning else { return }
+        add(incoming)
+        incoming = []
+    }
+
+    private func configureQueue() {
+        queue.configure(language: language, transcription: transcription)
     }
 
     private func start() {
-        configureBuilder()
+        configureQueue()
         switch translation {
         case .apple:
-            // Apple's TranslationSession is only handed out through `.translationTask`.
+            // Apple's TranslationSession is only handed out through `.translationTask`; one session
+            // serves every file in the queue.
             if configuration == nil || configurationLanguage != language {
                 configuration = AppleLessonTranslator.configuration(for: language)
                 configurationLanguage = language
@@ -205,8 +249,62 @@ struct MacNewLessonView: View {
             }
         case .claude:
             Task {
-                if let id = await builder.run(translation: .claude, session: nil, library: library) { onComplete(id) }
+                await queue.run(translation: .claude, session: nil, library: library, folderID: folderID)
+                finishIfDone()
             }
+        }
+    }
+
+    /// Closes when every file became a lesson; otherwise stays open to show what failed.
+    private func finishIfDone() {
+        takeIncoming()
+        if queue.allDone { onComplete(queue.finishedIDs, folderID) }
+    }
+}
+
+private struct QueueRow: View {
+    @ObservedObject var item: LessonQueue.Item
+    @ObservedObject var builder: LessonBuilder
+    let canRemove: Bool
+    let onRemove: () -> Void
+
+    var body: some View {
+        HStack(alignment: .top, spacing: 10) {
+            icon.frame(width: 20).padding(.top, 2)
+            VStack(alignment: .leading, spacing: 4) {
+                Text(item.url.lastPathComponent).lineLimit(1).truncationMode(.middle)
+                switch item.outcome {
+                case .waiting:
+                    Text(builder.hasDraft ? "받아쓰기 완료 · 번역 대기" : "대기 중")
+                        .font(.caption).foregroundStyle(.secondary)
+                case .running:
+                    Text(builder.status).font(.caption).foregroundStyle(.secondary)
+                    if let fraction = builder.progress { ProgressView(value: fraction) }
+                    else { ProgressView().progressViewStyle(.linear) }
+                case .done:
+                    Text(builder.sentenceCount > 0 ? "완료 · \(builder.sentenceCount)문장" : "완료")
+                        .font(.caption).foregroundStyle(.secondary)
+                case .failed(let message):
+                    Text((builder.hasDraft ? "번역 실패 · " : "") + message)
+                        .font(.caption).foregroundStyle(.red).lineLimit(3).textSelection(.enabled)
+                }
+            }
+            Spacer(minLength: 0)
+            if canRemove, item.lessonID == nil {
+                Button { onRemove() } label: { Image(systemName: "xmark.circle.fill") }
+                    .buttonStyle(.borderless).foregroundStyle(.secondary).help("목록에서 빼기")
+            }
+        }
+        .padding(.horizontal, 12).padding(.vertical, 9)
+    }
+
+    @ViewBuilder
+    private var icon: some View {
+        switch item.outcome {
+        case .waiting: Image(systemName: "clock").foregroundStyle(.secondary)
+        case .running: ProgressView().controlSize(.small)
+        case .done: Image(systemName: "checkmark.circle.fill").foregroundStyle(.green)
+        case .failed: Image(systemName: "exclamationmark.triangle.fill").foregroundStyle(.orange)
         }
     }
 }

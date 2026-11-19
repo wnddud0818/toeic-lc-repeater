@@ -22,6 +22,13 @@ struct ArchiveManifest: Codable {
 }
 
 enum LessonArchive {
+    /// Lesson files are `.lrlesson` (Listen & Repeat). Files saved before the rename, `.lcrlesson`,
+    /// keep the same contents and still open. The internal format name stays unchanged so that
+    /// older app versions can read new files.
+    static let fileExtension = "lrlesson"
+    static let fileExtensions: Set<String> = ["lrlesson", "lcrlesson"]
+    static func isLessonFile(_ url: URL) -> Bool { fileExtensions.contains(url.pathExtension.lowercased()) }
+
     static let magic = Data("LCRLESS1".utf8)
     static let maxManifest: UInt64 = 8 * 1024 * 1024
     static let maxAudio: UInt64 = 2 * 1024 * 1024 * 1024

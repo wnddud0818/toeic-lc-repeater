@@ -40,7 +40,7 @@ final class LessonCoreTests: XCTestCase {
     func testRejectsChangedAudio() throws {
         var changed = try archive()
         changed[changed.count - 1] ^= 1
-        let file = folder.appendingPathComponent("changed.lcrlesson")
+        let file = folder.appendingPathComponent("changed.lrlesson")
         try changed.write(to: file)
         XCTAssertThrowsError(try LessonArchive.unpack(from: file, into: folder.appendingPathComponent("out"))) { error in
             guard case LessonError.checksumMismatch = error else {
@@ -50,13 +50,13 @@ final class LessonCoreTests: XCTestCase {
     }
 
     func testRejectsWrongAudioFormatEvenWithValidHash() throws {
-        let file = folder.appendingPathComponent("bad-audio.lcrlesson")
+        let file = folder.appendingPathComponent("bad-audio.lrlesson")
         try archive(audio: Data(repeating: 0, count: 128)).write(to: file)
         XCTAssertThrowsError(try LessonArchive.unpack(from: file, into: folder.appendingPathComponent("out")))
     }
 
     func testRejectsUnsupportedVersionAndOversizedManifest() throws {
-        let file = folder.appendingPathComponent("version.lcrlesson")
+        let file = folder.appendingPathComponent("version.lrlesson")
         try archive(version: 2).write(to: file)
         XCTAssertThrowsError(try LessonArchive.unpack(from: file, into: folder.appendingPathComponent("out")))
         var header = LessonArchive.magic
@@ -78,7 +78,7 @@ final class LessonCoreTests: XCTestCase {
         let original = sample()
         let lesson = Lesson(id: "../../outside", title: original.title, duration: original.duration,
                             created: original.created, sentences: original.sentences)
-        let file = folder.appendingPathComponent("path.lcrlesson")
+        let file = folder.appendingPathComponent("path.lrlesson")
         try archive(lesson: lesson).write(to: file)
         let destination = folder.appendingPathComponent("safe")
         _ = try LessonArchive.unpack(from: file, into: destination)
@@ -92,7 +92,7 @@ final class LessonCoreTests: XCTestCase {
         var lesson = sample()
         lesson.lang = "ja"
         lesson.sentences[1].en = "こんにちは。"
-        let destination = folder.appendingPathComponent("mac.lcrlesson")
+        let destination = folder.appendingPathComponent("mac.lrlesson")
         try Data("old".utf8).write(to: destination)
         try LessonArchive.pack(lesson: lesson, audio: audioURL, to: destination)
         let unpacked = try LessonArchive.unpack(from: destination, into: folder.appendingPathComponent("in"))

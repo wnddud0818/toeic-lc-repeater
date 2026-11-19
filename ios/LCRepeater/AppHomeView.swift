@@ -31,7 +31,7 @@ struct AppHomeView: View {
                             Text("어디에서 시작할까요?").font(.largeTitle.bold())
                             Text("영어·일본어를 듣고, 한 문장씩 내 속도로 반복해요.")
                                 .foregroundStyle(.secondary)
-                            choice("컴퓨터에서 불러오기", subtitle: "PC에서 준비한 .lcrlesson 파일 가져오기",
+                            choice("컴퓨터에서 불러오기", subtitle: "PC·Mac에서 준비한 .lrlesson 파일 가져오기",
                                    icon: "desktopcomputer.and.arrow.down") {
                                 openLessonID = nil
                                 showingLibrary = true
@@ -77,7 +77,7 @@ struct AppHomeView: View {
         }
         .onOpenURL { url in
             guard url.isFileURL else { return }
-            if url.pathExtension.lowercased() != "lcrlesson" {
+            if !LessonArchive.isLessonFile(url) {
                 openIncomingAudio(url)
                 return
             }
@@ -116,7 +116,7 @@ struct AppHomeView: View {
 
     private func openIncomingAudio(_ url: URL) {
         guard UTType(filenameExtension: url.pathExtension)?.conforms(to: .audio) == true else {
-            incomingError = "MP3, M4A, WAV 등의 음원이나 .lcrlesson 파일을 열어 주세요."
+            incomingError = "MP3, M4A, WAV 등의 음원이나 .lrlesson 레슨 파일을 열어 주세요."
             return
         }
         guard !deviceBusy, !copyingAudio else {

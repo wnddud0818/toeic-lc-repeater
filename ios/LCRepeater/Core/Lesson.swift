@@ -1,7 +1,7 @@
 import Foundation
 
 /// The language of the audio. Sentence text is stored in `en` (source) and `ko` (translation)
-/// regardless of language so that older lessons and .lcrlesson files keep the same shape.
+/// regardless of language so that older lessons and lesson files keep the same shape.
 enum StudyLanguage: String, CaseIterable, Codable, Identifiable, Sendable {
     case english = "en"
     case japanese = "ja"

@@ -1,7 +1,9 @@
 #!/usr/bin/env python3
-"""Export a processed lesson as one streaming, versioned .lcrlesson document.
+"""Export a processed lesson as one streaming, versioned .lrlesson document.
 
-    python3 export_lesson.py data/<lesson-id> -o lesson.lcrlesson
+    python3 export_lesson.py data/<lesson-id> -o lesson.lrlesson
+
+.lrlesson (Listen & Repeat) replaced the old .lcrlesson extension; the contents are identical.
 
 No model, translation service, or third-party package is needed for export.
 The format is documented in docs/ios-transfer.md and read by LessonArchive.swift.
@@ -140,7 +142,7 @@ def _remove_temp(path):
 def main():
     parser = argparse.ArgumentParser(description='아이폰에서 가져올 레슨 파일 만들기')
     parser.add_argument('lesson_dir', type=Path, help='lesson.json과 master.wav가 있는 폴더')
-    parser.add_argument('-o', '--output', type=Path, required=True, help='저장할 .lcrlesson 파일')
+    parser.add_argument('-o', '--output', type=Path, required=True, help='저장할 .lrlesson 파일')
     args = parser.parse_args()
     try:
         result = export_file(args.lesson_dir, args.output)

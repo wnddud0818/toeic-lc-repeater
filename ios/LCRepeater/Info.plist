@@ -45,7 +45,7 @@
         <key>UTTypeDescription</key><string>LC Repeater Lesson</string>
         <key>UTTypeConformsTo</key><array><string>public.data</string></array>
         <key>UTTypeTagSpecification</key><dict>
-            <key>public.filename-extension</key><array><string>lcrlesson</string></array>
+            <key>public.filename-extension</key><array><string>lrlesson</string><string>lcrlesson</string></array>
             <key>public.mime-type</key><string>application/vnd.lcrepeater.lesson</string>
         </dict>
     </dict></array>

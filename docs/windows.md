@@ -11,7 +11,7 @@ Windows 10 1903 이상 / Windows 11의 Intel·AMD 64비트(x64) PC용이다.
 5. 한국어 번역을 쓰려면 [Claude Code의 Windows 설치 안내](https://code.claude.com/docs/en/setup)를 따라 설치하고 터미널에서 로그인한다. 설치 후 앱을 다시 열면 된다. 번역 없이도 영어 반복 학습은 쓸 수 있다.
 
 영어 블러 → 영어 공개 → 한국어 → 다시 블러 전환과 **아이폰용 레슨 내보내기**도 제공한다.
-윈도우의 iCloud Drive 등으로 `.lcrlesson` 파일을 아이폰에 옮겨 iOS 앱에서 가져오면 된다.
+윈도우의 iCloud Drive 등으로 `.lrlesson` 파일을 아이폰에 옮겨 iOS 앱에서 가져오면 된다.
 
 데이터·모델·로그·WebView 설정은 `%LOCALAPPDATA%\LC Repeater\`에 저장한다.
 프로그램을 업데이트하거나 제거해도 이 폴더는 삭제하지 않는다. 다른 폴더를 쓰려면 `LCR_SUPPORT_DIR`를 지정한다.

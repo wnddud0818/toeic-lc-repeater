@@ -118,12 +118,15 @@ final class LessonBuilder: ObservableObject {
     }
 
     /// Returns the new library entry's ID, or nil when it failed or was cancelled.
-    func run(translation: TranslationChoice, session: TranslationSession?, library: LessonLibrary) async -> UUID? {
+    func run(translation: TranslationChoice, session: TranslationSession?, library: LessonLibrary,
+             folderID: UUID? = nil) async -> UUID? {
         guard job == nil, sourceURL != nil else { return nil }
         isBusy = true
         error = nil
         activeSession = session
-        let operation = Task { try await self.process(translation: translation, session: session, library: library) }
+        let operation = Task {
+            try await self.process(translation: translation, session: session, library: library, folderID: folderID)
+        }
         job = operation
         defer {
             job = nil; activeSession = nil; isBusy = false; progress = nil
@@ -140,9 +143,9 @@ final class LessonBuilder: ObservableObject {
         return nil
     }
 
-    func saveWithoutTranslation(library: LessonLibrary) -> UUID? {
+    func saveWithoutTranslation(library: LessonLibrary, folderID: UUID? = nil) -> UUID? {
         guard !isBusy, let draft else { return nil }
-        do { return try finish(draft, library: library) }
+        do { return try finish(draft, library: library, folderID: folderID) }
         catch { self.error = error.localizedDescription; return nil }
     }
 
@@ -170,7 +173,7 @@ final class LessonBuilder: ObservableObject {
     // MARK: - Steps
 
     private func process(translation: TranslationChoice, session: TranslationSession?,
-                         library: LessonLibrary) async throws -> UUID {
+                         library: LessonLibrary, folderID: UUID?) async throws -> UUID {
         guard let sourceURL else { throw LocalLessonError.invalidAudio }
         if staging == nil { staging = try library.localStagingArea(for: id) }
         guard let staging else { throw LocalLessonError.invalidAudio }
@@ -208,7 +211,7 @@ final class LessonBuilder: ObservableObject {
             draft = lesson
         }
         try Task.checkCancellation()
-        return try finish(lesson, library: library)
+        return try finish(lesson, library: library, folderID: folderID)
     }
 
     private func transcribeWithApple(_ source: URL, staging: URL) async throws -> Lesson {
@@ -252,7 +255,7 @@ final class LessonBuilder: ObservableObject {
                       created: Date().timeIntervalSince1970, sentences: made.sentences, lang: language.rawValue)
     }
 
-    private func finish(_ lesson: Lesson, library: LessonLibrary) throws -> UUID {
+    private func finish(_ lesson: Lesson, library: LessonLibrary, folderID: UUID?) throws -> UUID {
         guard let staging else { throw LocalLessonError.invalidAudio }
         status = "레슨을 저장하는 중이에요"
         // Only the player audio moves into the library folder.
@@ -260,11 +263,10 @@ final class LessonBuilder: ObservableObject {
         where item.lastPathComponent != "master.wav" {
             try? FileManager.default.removeItem(at: item)
         }
-        let entry = try library.finishLocalLesson(lesson, id: id, staging: staging)
+        let entry = try library.finishLocalLesson(lesson, id: id, staging: staging, folderID: folderID)
         self.staging = nil
         draft = nil
         sourceURL = nil
-        sentenceCount = 0
         id = UUID()
         status = "레슨을 만들었어요"
         return entry.id
@@ -279,5 +281,116 @@ final class LessonBuilder: ObservableObject {
     private func setTranscriptionProgress(_ fraction: Double) {
         status = "\(language.name)를 전사하는 중이에요"
         setProgress(fraction)
+    }
+}
+
+/// Several audio files made into lessons one after another with the same options.
+/// A failed file does not stop the rest; it can be retried or saved without translations afterwards.
+@MainActor
+final class LessonQueue: ObservableObject {
+    @MainActor
+    final class Item: ObservableObject, Identifiable {
+        enum Outcome: Equatable {
+            case waiting, running, done(UUID), failed(String)
+        }
+
+        let id = UUID()
+        let url: URL
+        let builder = LessonBuilder()
+        @Published fileprivate(set) var outcome = Outcome.waiting
+
+        init(url: URL) {
+            self.url = url
+            builder.select(url)
+        }
+
+        var lessonID: UUID? {
+            if case .done(let id) = outcome { return id }
+            return nil
+        }
+        var isFailed: Bool {
+            if case .failed = outcome { return true }
+            return false
+        }
+    }
+
+    @Published private(set) var items: [Item] = []
+    @Published private(set) var isRunning = false
+    private var stopRequested = false
+    private weak var current: Item?
+
+    var finishedIDs: [UUID] { items.compactMap(\.lessonID) }
+    var remaining: [Item] { items.filter { $0.outcome == .waiting || $0.isFailed } }
+    var failedCount: Int { items.filter(\.isFailed).count }
+    /// Failed after transcription: these can still be saved without translations.
+    var draftsAwaitingTranslation: [Item] { items.filter { $0.isFailed && $0.builder.hasDraft } }
+    var allDone: Bool { !items.isEmpty && items.allSatisfy { $0.lessonID != nil } }
+
+    func add(_ urls: [URL], language: StudyLanguage, transcription: TranscriptionChoice) {
+        guard !isRunning else { return }
+        for url in urls where !items.contains(where: { $0.url == url }) {
+            let item = Item(url: url)
+            item.builder.configure(language: language, transcription: transcription)
+            items.append(item)
+        }
+    }
+
+    func remove(_ item: Item) {
+        guard !isRunning || item !== current else { return }
+        item.builder.discard()
+        items.removeAll { $0 === item }
+    }
+
+    func clearFinished() {
+        guard !isRunning else { return }
+        items.removeAll { $0.lessonID != nil }
+    }
+
+    /// New options apply to files not yet made; a changed language or transcriber drops their drafts.
+    func configure(language: StudyLanguage, transcription: TranscriptionChoice) {
+        guard !isRunning else { return }
+        for item in items where item.lessonID == nil {
+            item.builder.configure(language: language, transcription: transcription)
+        }
+    }
+
+    func run(translation: TranslationChoice, session: TranslationSession?, library: LessonLibrary,
+             folderID: UUID?) async {
+        guard !isRunning else { return }
+        isRunning = true
+        stopRequested = false
+        defer { isRunning = false; current = nil }
+        for item in remaining {
+            if stopRequested || Task.isCancelled { break }
+            current = item
+            item.outcome = .running
+            if let id = await item.builder.run(translation: translation, session: session, library: library,
+                                               folderID: folderID) {
+                item.outcome = .done(id)
+            } else if stopRequested || Task.isCancelled {
+                item.outcome = .waiting   // Cancelled: a finished transcription is kept for next time.
+                break
+            } else {
+                item.outcome = .failed(item.builder.error ?? "처리하지 못했어요")
+            }
+        }
+    }
+
+    func cancel() {
+        stopRequested = true
+        current?.builder.cancel()
+    }
+
+    func saveDraftsWithoutTranslation(library: LessonLibrary, folderID: UUID?) {
+        guard !isRunning else { return }
+        for item in draftsAwaitingTranslation {
+            if let id = item.builder.saveWithoutTranslation(library: library, folderID: folderID) {
+                item.outcome = .done(id)
+            }
+        }
+    }
+
+    func discardAll() {
+        for item in items { item.builder.stopAndDiscard() }
     }
 }

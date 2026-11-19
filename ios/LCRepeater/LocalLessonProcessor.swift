@@ -52,12 +52,12 @@ final class LocalLessonProcessor: ObservableObject {
         status = "음원을 준비하고 있어요"
     }
 
-    func run(session: TranslationSession, library: LessonLibrary) async -> UUID? {
+    func run(session: TranslationSession, library: LessonLibrary, folderID: UUID? = nil) async -> UUID? {
         guard job == nil, sourceURL != nil else { return nil }
         isBusy = true
         error = nil
         activeSession = session
-        let operation = Task { try await self.process(session: session, library: library) }
+        let operation = Task { try await self.process(session: session, library: library, folderID: folderID) }
         job = operation
         defer {
             job = nil; activeSession = nil; isBusy = false; progress = nil
@@ -76,7 +76,7 @@ final class LocalLessonProcessor: ObservableObject {
         return nil
     }
 
-    private func process(session: TranslationSession, library: LessonLibrary) async throws -> UUID {
+    private func process(session: TranslationSession, library: LessonLibrary, folderID: UUID?) async throws -> UUID {
         guard let sourceURL else { throw LocalLessonError.invalidAudio }
         let language = self.language
         if let message = await Self.availabilityError(for: language) {
@@ -120,7 +120,7 @@ final class LocalLessonProcessor: ObservableObject {
         }
         try Task.checkCancellation()
         status = "레슨을 저장하는 중이에요"
-        let entry = try library.finishLocalLesson(lesson, id: id, staging: staging)
+        let entry = try library.finishLocalLesson(lesson, id: id, staging: staging, folderID: folderID)
         self.staging = nil
         self.draft = nil
         self.prepared = nil

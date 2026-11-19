@@ -22,7 +22,7 @@ class ExportTests(unittest.TestCase):
         self.lesson = make_lesson(self.folder)
 
     def test_export_preserves_metadata_and_audio_with_valid_checksum(self):
-        output = E.export_file(self.folder, self.root / 'export.lcrlesson')
+        output = E.export_file(self.folder, self.root / 'export.lrlesson')
         data = output.read_bytes()
         self.assertEqual(data[:8], E.MAGIC)
         length, = struct.unpack('<Q', data[8:16])
@@ -35,7 +35,7 @@ class ExportTests(unittest.TestCase):
         self.assertEqual(manifest['audio']['sha256'], hashlib.sha256(audio).hexdigest())
 
     def test_incomplete_lesson_does_not_replace_existing_destination(self):
-        output = self.root / 'export.lcrlesson'
+        output = self.root / 'export.lrlesson'
         output.write_bytes(b'existing download')
         (self.folder / 'status.json').write_text('{"stage":"translate"}')
         with self.assertRaises(E.ExportError):
@@ -44,7 +44,7 @@ class ExportTests(unittest.TestCase):
         self.assertEqual(list(self.root.glob('*.part')), [])
 
     def test_failed_write_preserves_previous_file_and_cleans_staging(self):
-        output = self.root / 'export.lcrlesson'
+        output = self.root / 'export.lrlesson'
         output.write_bytes(b'existing download')
         with patch.object(E.shutil, 'copyfileobj', side_effect=OSError('disk full')):
             with self.assertRaises(E.ExportError):
@@ -68,7 +68,7 @@ class ExportTests(unittest.TestCase):
         lesson['lang'] = 'ja'
         lesson['sentences'][1].update(en='こんにちは。', ko='안녕하세요.')
         (self.folder / 'lesson.json').write_text(json.dumps(lesson, ensure_ascii=False), encoding='utf-8')
-        data = E.export_file(self.folder, self.root / 'ja.lcrlesson').read_bytes()
+        data = E.export_file(self.folder, self.root / 'ja.lrlesson').read_bytes()
         length, = struct.unpack('<Q', data[8:16])
         self.assertEqual(json.loads(data[16:16 + length])['lesson'], lesson)
         lesson['lang'] = 'fr'
@@ -97,7 +97,7 @@ class ExportTests(unittest.TestCase):
         data = response.read()
         self.assertEqual(response.status, 200)
         self.assertEqual(len(data), int(response.getheader('Content-Length')))
-        self.assertIn('test-lesson.lcrlesson', response.getheader('Content-Disposition'))
+        self.assertIn('test-lesson.lrlesson', response.getheader('Content-Disposition'))
         connection.request('HEAD', '/api/lessons/test-lesson/export')
         response = connection.getresponse()
         self.assertEqual(response.status, 200)
