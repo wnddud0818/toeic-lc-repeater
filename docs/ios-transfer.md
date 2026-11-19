@@ -105,7 +105,7 @@ manifest 예시:
   "format": "toeic-lc-repeater.lesson",
   "version": 1,
   "lesson": {
-    "id": "lesson-id", "title": "레슨", "duration": 2.0, "created": 1700000000,
+    "id": "lesson-id", "title": "레슨", "lang": "en", "duration": 2.0, "created": 1700000000,
     "sentences": [{"i": 1, "start": 0.1, "end": 1.5, "en": "Hello.", "ko": "안녕하세요.", "kind": "content"}]
   },
   "audio": {
@@ -114,6 +114,8 @@ manifest 예시:
   }
 }
 ```
+
+`lang`은 원문 언어(`en` 또는 `ja`)다. 없으면 영어로 본다(예전 레슨). 언어와 상관없이 원문은 `en`, 번역은 `ko` 필드에 둔다. 예전 앱은 모르는 `lang`을 무시하므로 일본어 레슨도 열 수 있다(표시만 EN으로 나온다).
 
 가져올 때 전체 길이·버전·문장 ID·구간·음원 형식·음원 길이·SHA-256을 확인한다. SHA-256은 전달 중 손상 검사이며 제작자 인증은 아니다. 외부 ID나 파일명을 저장 경로에 사용하지 않고 앱이 생성한 UUID 폴더에 저장한다. 완료 전 임시 폴더에서 검증하고, 성공 후에만 보관함에 추가한다.
 

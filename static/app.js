@@ -13,7 +13,13 @@ const ICON = {
 };
 
 const BUSY = ['queued', 'prepare', 'transcribe', 'segment', 'translate'];
-const DEFAULTS = { reps: 20, gap: 0.6, speed: 1, after: 'stop', hideDirections: true };
+const DEFAULTS = { reps: 20, gap: 0.6, speed: 1, after: 'stop', hideDirections: true, uploadLang: 'en' };
+// 원문 언어. 문장 필드는 언어와 상관없이 원문 en, 번역 ko다(예전 레슨은 lang이 없으면 영어).
+const LANGS = {
+  en: { name: '영어', badge: 'EN' },
+  ja: { name: '일본어', badge: 'JA' },
+};
+const langOf = code => LANGS[code] ? code : 'en';
 
 const store = {
   get(key, fallback) {
@@ -175,11 +181,16 @@ function statusChip(st, count) {
 function showHome() {
   $crumb.textContent = '';
   document.title = 'LC Repeater';
+  const upLang = langOf(settings.uploadLang);
   $app.innerHTML = `
+    <div class="lang-pick" role="radiogroup" aria-label="음원 언어">
+      <span class="lang-pick-label">음원 언어</span>
+      ${Object.entries(LANGS).map(([code, l]) => `<label class="seg"><input type="radio" name="srcLang" value="${code}"${code === upLang ? ' checked' : ''}><span>${l.name}</span></label>`).join('')}
+    </div>
     <label class="drop" id="drop">
       <input type="file" id="file" accept="audio/*,.mp3,.m4a,.wav" multiple hidden>
       ${ICON.upload}
-      <div class="drop-title">mp3 파일을 끌어다 놓거나 눌러서 고르세요</div>
+      <div class="drop-title"><span id="dropLang">${LANGS[upLang].name}</span> mp3 파일을 끌어다 놓거나 눌러서 고르세요</div>
       <div class="drop-sub">음성 인식 → 문장 나누기 → 한국어 번역까지 자동으로 합니다</div>
     </label>
     ${setup && !setup.model.ready ? `<div class="banner" style="margin-top:12px"><span class="msg">음성 인식 모델이 없어서 새 음원은 아직 올릴 수 없어요.</span>
@@ -188,6 +199,11 @@ function showHome() {
     <ul class="lessons" id="lessons"><li class="empty">불러오는 중…</li></ul>`;
 
   if ($('#toSetup')) $('#toSetup').addEventListener('click', () => { setupSkipped = false; route(); });
+  $app.querySelectorAll('input[name="srcLang"]').forEach(r => r.addEventListener('change', () => {
+    settings.uploadLang = langOf(r.value);
+    saveSettings();
+    $('#dropLang').textContent = LANGS[settings.uploadLang].name;
+  }));
   const drop = $('#drop');
   const input = $('#file');
   input.addEventListener('change', () => { uploadFiles(input.files); input.value = ''; });
@@ -208,7 +224,7 @@ function showHome() {
         <li><a class="lesson-item" href="#/l/${l.id}">
           <span class="lesson-title">${esc(l.title)}</span>
           ${statusChip(l.status, l.count)}
-          <span class="lesson-sub">${fmtDate(l.created)}${l.duration ? ' · ' + fmtDuration(l.duration) : ''}</span>
+          <span class="lesson-sub">${LANGS[langOf(l.lang)].name} · ${fmtDate(l.created)}${l.duration ? ' · ' + fmtDuration(l.duration) : ''}</span>
         </a></li>`).join('') : '<li class="empty">아직 올린 음원이 없어요.</li>';
       timer = setTimeout(refresh, list.some(l => isBusy(l.status)) ? 1500 : 6000);
     } catch (e) {
@@ -224,11 +240,12 @@ async function uploadFiles(fileList) {
   const files = Array.from(fileList || []).filter(f => /\.(mp3|m4a|wav|aac|ogg|flac|mp4)$/i.test(f.name));
   if (!files.length) { toast('mp3 같은 오디오 파일만 올릴 수 있어요'); return; }
   let lastId = null;
+  const lang = langOf(settings.uploadLang);
   for (const f of files) {
     toast(`올리는 중: ${f.name}`, 0);
     try {
       const r = await api('/api/lessons', {
-        method: 'POST', headers: { 'X-Filename': encodeURIComponent(f.name) }, body: f,
+        method: 'POST', headers: { 'X-Filename': encodeURIComponent(f.name), 'X-Lang': lang }, body: f,
       });
       lastId = r.id;
     } catch (e) {
@@ -289,6 +306,8 @@ class Player {
   constructor(id, data) {
     this.id = id;
     this.lesson = data.lesson;
+    this.lang = langOf(this.lesson.lang);
+    this.L = LANGS[this.lang];
     this.S = this.lesson.sentences;
     this.status = data.status || {};
     this.order = [];
@@ -334,14 +353,15 @@ class Player {
   }
 
   mount() {
+    const L = this.L;
     const opt = (vals, cur) => vals.map(([v, label]) =>
       `<option value="${v}"${String(v) === String(cur) ? ' selected' : ''}>${label}</option>`).join('');
     $app.innerHTML = `
     <div class="player">
       <div class="stage">
         <div id="banner"></div>
-        <div class="card" id="card" tabindex="0" role="button" aria-label="영어 공개">
-          <div class="card-meta"><span id="pos"></span><span class="lang" id="lang">EN</span></div>
+        <div class="card" id="card" tabindex="0" role="button" aria-label="${L.name} 공개">
+          <div class="card-meta"><span id="pos"></span><span class="lang" id="lang">${L.badge}</span></div>
           <p class="sentence" id="sentence"></p>
           <div class="card-hint" id="hint"></div>
         </div>
@@ -354,7 +374,7 @@ class Player {
           <button class="btn-icon" id="prev" title="이전 문장 (←)" aria-label="이전 문장">${ICON.prev}</button>
           <button class="btn-icon primary" id="play" aria-label="재생/정지"></button>
           <button class="btn-icon" id="next" title="다음 문장 (→)" aria-label="다음 문장">${ICON.next}</button>
-          <button class="btn-icon" id="langBtn" title="영어 공개 (T)" aria-label="영어 공개"><b>EN</b></button>
+          <button class="btn-icon" id="langBtn" title="${L.name} 공개 (T)" aria-label="${L.name} 공개"><b>${L.badge}</b></button>
         </div>
         <div class="panel">
           <div class="settings">
@@ -375,7 +395,7 @@ class Player {
           <span class="trim-group">끝 <button class="btn-sm" data-trim="end" data-d="-0.1">−0.1</button><button class="btn-sm" data-trim="end" data-d="0.1">+0.1</button></span>
           <span class="trim-range" id="range"></span>
         </div>
-        <div class="keys"><kbd>Space</kbd> 재생/정지 · <kbd>←</kbd> <kbd>→</kbd> 이전/다음 · <kbd>T</kbd> 영어 공개/한국어/가리기 · <kbd>R</kbd> 처음부터</div>
+        <div class="keys"><kbd>Space</kbd> 재생/정지 · <kbd>←</kbd> <kbd>→</kbd> 이전/다음 · <kbd>T</kbd> ${L.name} 공개/한국어/가리기 · <kbd>R</kbd> 처음부터</div>
         <div class="panel export-panel" id="exportPanel">
           <a class="btn" id="exportLink" download>아이폰용 레슨 내보내기</a>
           <span>아이폰으로 파일을 옮긴 뒤 앱에서 가져오세요.</span>
@@ -630,7 +650,7 @@ class Player {
     this.el.exportPanel.style.display = st.stage === 'done' ? '' : 'none';
     this.el.exportLink.href = `/api/lessons/${this.id}/export`;
     if (st.stage === 'translate') {
-      el.innerHTML = `<div class="banner busy"><span class="msg">번역하는 중… ${Math.round((st.progress || 0) * 100)}% · 그동안 영어로 먼저 들을 수 있어요</span></div>`;
+      el.innerHTML = `<div class="banner busy"><span class="msg">번역하는 중… ${Math.round((st.progress || 0) * 100)}% · 그동안 ${this.L.name}로 먼저 들을 수 있어요</span></div>`;
     } else if (st.stage === 'done' && st.error) {
       el.innerHTML = `<div class="banner"><span class="msg">번역하지 못했어요: ${esc(st.error)}</span>
         <button class="btn" id="retranslate">번역 다시 하기</button></div>`;
@@ -649,9 +669,11 @@ class Player {
     }
     const showKo = this.cardFace === 'korean';
     const blurred = this.cardFace === 'blurredEnglish';
-    const action = blurred ? '영어 공개' : showKo ? '영어 가리기' : '한국어 보기';
+    const L = this.L;
+    const action = blurred ? `${L.name} 공개` : showKo ? `${L.name} 가리기` : '한국어 보기';
     el.pos.textContent = `${this.pos + 1} / ${this.order.length}`;
-    el.lang.textContent = showKo ? 'KO' : 'EN';
+    el.lang.textContent = showKo ? 'KO' : L.badge;
+    el.sentence.lang = showKo ? 'ko' : this.lang;
     el.card.classList.toggle('ko', showKo);
     el.sentence.classList.remove('muted');
     el.sentence.classList.toggle('blurred', blurred);
@@ -664,10 +686,10 @@ class Player {
       el.sentence.textContent = this.status.stage === 'translate' ? '번역하는 중이에요…' : '번역이 아직 없어요';
       el.sentence.classList.add('muted');
     }
-    el.hint.textContent = blurred ? '탭하면 영어 공개' : showKo ? '탭하면 영어 가리기' : '탭하면 한국어';
-    const accessibleText = blurred ? '영어가 가려져 있어요' : `${showKo ? '한국어' : '영어'}, ${el.sentence.textContent}`;
+    el.hint.textContent = blurred ? `탭하면 ${L.name} 공개` : showKo ? `탭하면 ${L.name} 가리기` : '탭하면 한국어';
+    const accessibleText = blurred ? `${L.name}가 가려져 있어요` : `${showKo ? '한국어' : L.name}, ${el.sentence.textContent}`;
     el.card.setAttribute('aria-label', `${this.pos + 1}번째 문장, ${accessibleText}. ${action}`);
-    el.langBtn.innerHTML = `<b>${blurred ? 'EN' : showKo ? '가림' : '한'}</b>`;
+    el.langBtn.innerHTML = `<b>${blurred ? L.badge : showKo ? '가림' : '한'}</b>`;
     el.langBtn.title = `${action} (T)`;
     el.langBtn.setAttribute('aria-label', action);
     el.prev.disabled = this.pos <= 0;
@@ -697,7 +719,7 @@ class Player {
   renderList() {
     this.el.list.innerHTML = this.order.map((k, p) => {
       const s = this.S[k];
-      return `<li data-p="${p}"${s.kind === 'direction' ? ' class="direction"' : ''}><span class="num">${p + 1}</span><span>${esc(s.en)}</span></li>`;
+      return `<li data-p="${p}"${s.kind === 'direction' ? ' class="direction"' : ''}><span class="num">${p + 1}</span><span lang="${this.lang}">${esc(s.en)}</span></li>`;
     }).join('');
     this.el.listCount.textContent = `${this.order.length}개`;
     this.highlightList();

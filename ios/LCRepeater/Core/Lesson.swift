@@ -1,5 +1,17 @@
 import Foundation
 
+/// The language of the audio. Sentence text is stored in `en` (source) and `ko` (translation)
+/// regardless of language so that older lessons and .lcrlesson files keep the same shape.
+enum StudyLanguage: String, CaseIterable, Codable, Identifiable, Sendable {
+    case english = "en"
+    case japanese = "ja"
+
+    var id: String { rawValue }
+    var name: String { self == .english ? "영어" : "일본어" }
+    var badge: String { self == .english ? "EN" : "JA" }
+    var speechLocaleIdentifier: String { self == .english ? "en-US" : "ja-JP" }
+}
+
 struct Sentence: Codable, Equatable, Identifiable, Sendable {
     let i: Int
     var start: Double
@@ -17,8 +29,13 @@ struct Lesson: Codable, Equatable, Identifiable, Sendable {
     let duration: Double
     let created: Double
     var sentences: [Sentence]
+    /// nil for lessons made before language selection existed, which are English.
+    var lang: String? = nil
+
+    var language: StudyLanguage { lang.flatMap(StudyLanguage.init(rawValue:)) ?? .english }
 
     func validate() throws {
+        if let lang, StudyLanguage(rawValue: lang) == nil { throw LessonError.invalidLesson }
         guard !id.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
               !title.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
               duration.isFinite, duration > 0, created.isFinite,

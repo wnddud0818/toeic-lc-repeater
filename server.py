@@ -193,6 +193,7 @@ class Handler(BaseHTTPRequestHandler):
             'id': lid,
             'title': meta.get('title', lid),
             'created': meta.get('created'),
+            'lang': P.lang_of(meta),
             'status': read_status(lid),
             'count': len(lesson['sentences']) if lesson else 0,
             'duration': lesson.get('duration') if lesson else None,
@@ -243,6 +244,9 @@ class Handler(BaseHTTPRequestHandler):
         ext = os.path.splitext(name)[1].lower()
         if ext not in AUDIO_EXT:
             return self.fail(400, '오디오 파일(mp3 등)만 올릴 수 있습니다')
+        lang = (self.headers.get('X-Lang') or P.DEFAULT_LANG).strip().lower()
+        if lang not in P.LANGS:
+            return self.fail(400, '지원하지 않는 언어입니다')
         n = int(self.headers.get('Content-Length') or 0)
         if n <= 0 or n > MAX_UPLOAD:
             return self.fail(400, '파일 크기가 잘못되었습니다')
@@ -266,7 +270,7 @@ class Handler(BaseHTTPRequestHandler):
             shutil.rmtree(d, ignore_errors=True)
             raise
         P.write_json(os.path.join(d, 'meta.json'), {
-            'title': os.path.splitext(os.path.basename(name))[0], 'created': time.time()})
+            'title': os.path.splitext(os.path.basename(name))[0], 'lang': lang, 'created': time.time()})
         P.set_status(d, 'queued')
         jobs.put(('process', lid))
         self.send_json({'id': lid}, 201)

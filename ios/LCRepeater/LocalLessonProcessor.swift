@@ -7,7 +7,8 @@ import Translation
 @MainActor
 final class LocalLessonProcessor: ObservableObject {
     @Published private(set) var isBusy = false
-    @Published private(set) var status = "영어 음원을 선택해 주세요"
+    @Published private(set) var status = "음원을 선택해 주세요"
+    @Published private(set) var language = StudyLanguage.english
     @Published private(set) var progress: Double?
     @Published private(set) var error: String?
     @Published private(set) var sourceURL: URL?
@@ -22,8 +23,17 @@ final class LocalLessonProcessor: ObservableObject {
 
     var canRetryTranslation: Bool { !isBusy && draft != nil }
 
-    static func configuration() -> TranslationSession.Configuration {
-        let source = Locale.Language(identifier: "en")
+    /// Changing the language drops any half-made draft, which belongs to the previous language.
+    func setLanguage(_ newValue: StudyLanguage) {
+        guard !isBusy, newValue != language else { return }
+        discard()
+        language = newValue
+        error = nil
+        status = "음원을 선택해 주세요"
+    }
+
+    static func configuration(for language: StudyLanguage) -> TranslationSession.Configuration {
+        let source = Locale.Language(identifier: language.rawValue)
         let target = Locale.Language(identifier: "ko")
         if #available(iOS 26.4, *) {
             return .init(source: source, target: target, preferredStrategy: .lowLatency)
@@ -32,16 +42,17 @@ final class LocalLessonProcessor: ObservableObject {
         return .init(source: source, target: target)
     }
 
-    static func availabilityError() async -> String? {
+    static func availabilityError(for language: StudyLanguage) async -> String? {
         guard SpeechTranscriber.isAvailable else { return LocalLessonError.unsupportedDevice.localizedDescription }
-        guard await AppleSpeechTranscription.englishLocale() != nil else {
-            return LocalLessonError.unsupportedEnglish.localizedDescription
+        guard await AppleSpeechTranscription.locale(for: language) != nil else {
+            return LocalLessonError.unsupportedSpeech(language).localizedDescription
         }
         let availability: LanguageAvailability
         if #available(iOS 26.4, *) { availability = LanguageAvailability(preferredStrategy: .lowLatency) }
         else { availability = LanguageAvailability() }
-        let status = await availability.status(from: Locale.Language(identifier: "en"), to: Locale.Language(identifier: "ko"))
-        return status == .unsupported ? LocalLessonError.unsupportedTranslation.localizedDescription : nil
+        let status = await availability.status(from: Locale.Language(identifier: language.rawValue),
+                                               to: Locale.Language(identifier: "ko"))
+        return status == .unsupported ? LocalLessonError.unsupportedTranslation(language).localizedDescription : nil
     }
 
     func select(_ url: URL) {
@@ -78,7 +89,8 @@ final class LocalLessonProcessor: ObservableObject {
 
     private func process(session: TranslationSession, library: LessonLibrary) async throws -> UUID {
         guard let sourceURL else { throw LocalLessonError.invalidAudio }
-        if let message = await Self.availabilityError() {
+        let language = self.language
+        if let message = await Self.availabilityError(for: language) {
             throw NSError(domain: "LocalLesson", code: 1, userInfo: [NSLocalizedDescriptionKey: message])
         }
         try Task.checkCancellation()
@@ -92,21 +104,23 @@ final class LocalLessonProcessor: ObservableObject {
         }
         guard let prepared else { throw LocalLessonError.invalidAudio }
         // Reject unreadable/non-audio files before asking to download models.
-        status = "영어·한국어 번역 모델을 준비하는 중이에요"
+        status = "\(language.name)→한국어 번역 모델을 준비하는 중이에요"
         progress = nil
         try await session.prepareTranslation()
         try Task.checkCancellation()
         if draft == nil {
-            status = "영어 전사 모델 준비·전사 중이에요"
+            status = "\(language.name) 전사 모델 준비·전사 중이에요"
             progress = nil
-            let pieces = try await AppleSpeechTranscription().transcribe(audioURL: prepared.url, duration: prepared.duration) { fraction in
+            let pieces = try await AppleSpeechTranscription().transcribe(audioURL: prepared.url, duration: prepared.duration,
+                                                                         language: language) { fraction in
                 await self.setTranscriptionProgress(fraction)
             }
             try Task.checkCancellation()
-            let sentences = try TranscriptSegmenter.sentences(from: pieces, duration: prepared.duration)
+            let sentences = try TranscriptSegmenter.sentences(from: pieces, duration: prepared.duration, language: language)
             let name = sourceURL.deletingPathExtension().lastPathComponent.trimmingCharacters(in: .whitespacesAndNewlines)
             draft = Lesson(id: id.uuidString, title: name.isEmpty ? "새 레슨" : name,
-                           duration: prepared.duration, created: Date().timeIntervalSince1970, sentences: sentences)
+                           duration: prepared.duration, created: Date().timeIntervalSince1970, sentences: sentences,
+                           lang: language.rawValue)
             sentenceCount = sentences.count
         }
         guard var lesson = draft else { throw LocalLessonError.noSpeech }
@@ -140,7 +154,7 @@ final class LocalLessonProcessor: ObservableObject {
 
     private func setProgress(_ fraction: Double) { progress = max(0, min(1, fraction)) }
     private func setTranscriptionProgress(_ fraction: Double) {
-        status = "영어를 전사하는 중이에요"
+        status = "\(language.name)를 전사하는 중이에요"
         setProgress(fraction)
     }
 

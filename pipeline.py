@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """mp3 → 문장별 시간 + 한국어 번역(lesson.json)
 
-    python3 pipeline.py 파일.mp3 [--title 제목] [--no-translate]
+    python3 pipeline.py 파일.mp3 [--lang en|ja] [--title 제목] [--no-translate]
 
 처리 순서
   1. 맥 내장 afconvert로 재생용 master.wav(32kHz 모노)와 인식용 16kHz wav를 만든다.
@@ -52,6 +52,28 @@ ABBREVIATIONS = {
 }
 CHOICE_LABEL = re.compile(r'^\(?[A-D][.)]?,?$')
 SENTENCE_END = re.compile(r'[.?!]["\')\]]*$')
+SENTENCE_END_CJK = re.compile(r'[。．？！?!][」』"\')\]）]*$')
+CJK_PUNCT = re.compile(r'[、。，．？！?!,.;:「」『』（）()\s]')
+CJK_ITEM_START = re.compile(r'^\s*([0-9０-９一二三四五六七八九十]+\s*番|問題)')
+
+# 원문 언어. 레슨의 'lang'(없으면 en). 문장 필드 이름은 호환을 위해 원문 'en', 번역 'ko'를 그대로 쓴다.
+LANGS = {
+    'en': {'name': '영어', 'cjk': False},
+    'ja': {'name': '일본어', 'cjk': True},
+}
+DEFAULT_LANG = 'en'
+
+# 문장 나누기 기준. 영어는 단어 수, 일본어(띄어쓰기 없음)는 문장부호를 뺀 글자 수로 센다.
+SEGMENT_RULES = {
+    False: {'min_split': 6, 'min_side': 3, 'unpunctuated': 8, 'short': 2, 'tiny': 1},
+    True: {'min_split': 10, 'min_side': 5, 'unpunctuated': 16, 'short': 4, 'tiny': 2},
+}
+
+
+def lang_of(obj):
+    """레슨·메타 정보의 언어 코드. 없거나 모르는 값이면 영어(예전 레슨)."""
+    lang = (obj or {}).get('lang')
+    return lang if lang in LANGS else DEFAULT_LANG
 
 STAGES = {
     'queued': ('대기 중', 0.0, 0.0),
@@ -254,12 +276,12 @@ def detect_silences(path, min_dur=0.15, window=0.01):
 
 # ---------- 2. 받아쓰기 ----------
 
-def transcribe(wav16, out_prefix, on_progress=None):
+def transcribe(wav16, out_prefix, on_progress=None, lang=DEFAULT_LANG):
     if not WHISPER:
         raise RuntimeError('whisper-cli를 찾을 수 없습니다. 앱을 다시 설치하거나 WHISPER_BIN을 설정해 주세요.')
     if not os.path.isfile(WHISPER_MODEL):
         raise RuntimeError('Whisper 모델이 없습니다: ' + WHISPER_MODEL)
-    cmd = [WHISPER, '-m', WHISPER_MODEL, '-f', wav16, '-l', 'en',
+    cmd = [WHISPER, '-m', WHISPER_MODEL, '-f', wav16, '-l', lang,
            '-ojf', '-of', out_prefix, '-pp', '-sns',
            '-mc', '0',                 # 앞 문장 문맥을 끊어 보기 기호(A. B. C.) 환각을 막는다
            '-nfa', '-dtw', 'large.v3.turbo',
@@ -275,12 +297,35 @@ def transcribe(wav16, out_prefix, on_progress=None):
             on_progress(int(m.group(1)) / 100.0)
     if proc.wait() != 0:
         raise RuntimeError('whisper-cli 실패:\n' + ''.join(tail))
-    with open(out_prefix + '.json', encoding='utf-8') as f:
-        return json.load(f)
+    return load_whisper_json(out_prefix + '.json')
 
 
-def extract_words(wjson):
-    """토큰을 단어로 묶는다. t는 단어 시작 추정 시각(초)."""
+def load_whisper_json(path):
+    """whisper.cpp는 토큰을 바이트 단위로 써서 한 글자가 여러 토큰에 걸치면 UTF-8이 깨진다(일본어 등).
+    깨진 바이트를 그대로 들고 읽었다가 토큰을 합친 뒤 extract_words에서 되살린다."""
+    with open(path, 'rb') as f:
+        return json.loads(f.read().decode('utf-8', 'surrogateescape'))
+
+
+def _utf8(raw, errors='strict'):
+    return raw.encode('utf-8', 'surrogateescape').decode('utf-8', errors)
+
+
+def _complete(raw):
+    try:
+        _utf8(raw)
+        return True
+    except UnicodeError:
+        return False
+
+
+def extract_words(wjson, lang=DEFAULT_LANG):
+    """토큰을 단어로 묶는다. t는 단어 시작 추정 시각(초).
+
+    영어는 공백으로 시작하는 토큰에서 새 단어를 시작한다. 일본어는 띄어쓰기가 없어서
+    토큰마다 따로 두되, 글자가 덜 끝난(UTF-8이 잘린) 토큰은 다음 토큰과 합친다.
+    """
+    cjk = LANGS[lang]['cjk']
     words = []
     for seg_no, seg in enumerate(wjson.get('transcription', [])):
         seg_from = seg['offsets']['from'] / 1000.0
@@ -290,7 +335,11 @@ def extract_words(wjson):
             text = tok.get('text', '')
             if not text or text.startswith('[_') or text.startswith('<|'):
                 continue
-            if text.startswith(' ') or not words or first:
+            if cjk:
+                new_word = first or not words or _complete(words[-1]['raw'])
+            else:
+                new_word = text.startswith(' ') or not words or first
+            if new_word:
                 if first:
                     t = seg_from          # 구간 시작 시각이 토큰 시각보다 정확하다
                 elif tok.get('t_dtw', -1) >= 0:
@@ -305,6 +354,7 @@ def extract_words(wjson):
             else:
                 words[-1]['raw'] += text
     for w in words:
+        w['raw'] = _utf8(w['raw'], 'replace')
         w['text'] = w['raw'].strip()
     return [w for w in words if w['text']]
 
@@ -324,8 +374,22 @@ def silence_between(silences, t_from, t_to, min_len):
     return longest_pause(silences, t_from, t_to) >= min_len
 
 
-def ends_sentence(cur, word, nxt):
+def unit_len(w, cjk):
+    return len(CJK_PUNCT.sub('', w['text'])) if cjk else 1
+
+
+def group_len(ws, cjk):
+    return sum(unit_len(w, cjk) for w in ws)
+
+
+def group_text(ws, cjk):
+    return ''.join(w['raw'] for w in ws).strip() if cjk else ' '.join(w['text'] for w in ws)
+
+
+def ends_sentence(cur, word, nxt, cjk=False):
     text = word['text']
+    if cjk:
+        return bool(SENTENCE_END_CJK.search(text))
     if not SENTENCE_END.search(text):
         return False
     if len(cur) == 1 and CHOICE_LABEL.match(text):
@@ -340,40 +404,52 @@ def content_words(ws):
     return [w for w in ws if not (w is ws[0] and CHOICE_LABEL.match(w['text']))]
 
 
-def is_unpunctuated(group):
+def is_unpunctuated(group, cjk=False):
     """Whisper가 가끔 문장부호·대문자 없이 받아쓰는 구간인가"""
-    return len(group) >= 8 and not any(re.search(r'[.,?!;:]', w['text']) for w in group[:-1])
+    marks = r'[、。，．？！?!,.;:]' if cjk else r'[.,?!;:]'
+    return group_len(group, cjk) >= SEGMENT_RULES[cjk]['unpunctuated'] and \
+        not any(re.search(marks, w['text']) for w in group[:-1])
 
 
-def split_long(group, silences):
+def split_long(group, silences, cjk=False):
     """문장부호로 못 나눈 덩어리를 쉼 길이로 나눈다.
 
     - 문장부호가 없으면: 0.33초 이상 쉬는 곳마다 자른다(문장 끝 쉼은 대개 이보다 길고 쉼표 자리는 짧다).
     - 문장부호가 있어도 MAX_SENTENCE_SEC를 넘으면: 가장 긴 쉼에서 자른다.
-    양쪽 모두 3단어 이상이 되게 자른다.
+    양쪽 모두 3단어(일본어는 5글자) 이상이 되게 자른다.
     """
-    if len(group) < 6:
+    rules = SEGMENT_RULES[cjk]
+    lens = [unit_len(w, cjk) for w in group]
+    total = sum(lens)
+    if total < rules['min_split']:
         return [group]
     duration = group[-1]['t'] - group[0]['t'] + 0.5
     best = None
-    for j in range(2, len(group) - 3):          # j번째 단어 뒤에서 자른다
+    left = 0
+    for j in range(len(group) - 1):             # j번째 단어 뒤에서 자른다
+        left += lens[j]
+        right = total - left
+        if left < rules['min_side'] or right < rules['min_side']:
+            continue
         pause = longest_pause(silences, group[j]['t'], group[j + 1]['t'])
-        if group[j]['text'].endswith(','):
+        if group[j]['text'].endswith((',', '、', '，')):
             pause += 0.05
-        balance = abs((j + 1) - (len(group) - j - 1)) / float(len(group))
+        balance = abs(left - right) / float(total)
         key = (round(pause, 2), -balance)
         if best is None or key > best[0]:
             best = (key, j, pause)
     if best is None:
         return [group]
     _, j, pause = best
-    if (is_unpunctuated(group) and pause >= UNPUNCTUATED_SPLIT_PAUSE) or \
+    if (is_unpunctuated(group, cjk) and pause >= UNPUNCTUATED_SPLIT_PAUSE) or \
             (duration > MAX_SENTENCE_SEC and pause >= 0.12):
-        return split_long(group[:j + 1], silences) + split_long(group[j + 1:], silences)
+        return split_long(group[:j + 1], silences, cjk) + split_long(group[j + 1:], silences, cjk)
     return [group]
 
 
-def split_sentences(words, silences):
+def split_sentences(words, silences, lang=DEFAULT_LANG):
+    cjk = LANGS[lang]['cjk']
+    rules = SEGMENT_RULES[cjk]
     for w in words:
         for s, e in silences:
             # 추정 시각이 무음 안에 떨어진 단어는 무음이 끝나는 지점(실제 발화 시작)으로 옮긴다
@@ -395,28 +471,33 @@ def split_sentences(words, silences):
                 groups.append(cur)
                 cur = []
         cur.append(w)
-        if ends_sentence(cur, w, nxt):
+        if ends_sentence(cur, w, nxt, cjk):
             groups.append(cur)
             cur = []
     if cur:
         groups.append(cur)
-    groups = [part for g in groups for part in split_long(g, silences)]
+    groups = [part for g in groups for part in split_long(g, silences, cjk)]
 
     # 아주 짧은 문장은 다음 문장과 합친다
-    #  - 2단어 이하("C. Yes.", "Of course."): 쉼 없이 이어질 때
-    #  - 1단어("Yes.", "Sure."): 0.8초 미만으로 쉬고 이어질 때. 다음이 보기·문항 번호면 합치지 않는다
+    #  - 2단어 이하("C. Yes.", "Of course.") · 일본어 4글자 이하: 쉼 없이 이어질 때
+    #  - 1단어("Yes.", "Sure.") · 일본어 2글자 이하("はい。"): 0.8초 미만으로 쉬고 이어질 때.
+    #    다음이 보기·문항 번호면 합치지 않는다
     merged, i = [], 0
     while i < len(groups):
         g = groups[i]
         nxt = groups[i + 1] if i + 1 < len(groups) else None
         merge = False
         if nxt:
-            n_words = len(content_words(g))
             pause = longest_pause(silences, g[-1]['t'], nxt[0]['t'])
-            starts_new_item = bool(CHOICE_LABEL.match(nxt[0]['text'])) or \
-                nxt[0]['text'].lower().startswith(('number', 'question'))
-            merge = (n_words <= 2 and pause < 0.35) or \
-                (n_words <= 1 and pause < 0.8 and not starts_new_item)
+            if cjk:
+                size = group_len(g, cjk)
+                starts_new_item = bool(CJK_ITEM_START.match(group_text(nxt[:6], cjk)))
+            else:
+                size = len(content_words(g))
+                starts_new_item = bool(CHOICE_LABEL.match(nxt[0]['text'])) or \
+                    nxt[0]['text'].lower().startswith(('number', 'question'))
+            merge = (size <= rules['short'] and pause < 0.35) or \
+                (size <= rules['tiny'] and pause < 0.8 and not starts_new_item)
         if merge:
             groups[i + 1] = g + nxt
         else:
@@ -439,7 +520,8 @@ def nearest_silence(silences, t, lo, hi, after=None):
     return best
 
 
-def place_boundaries(groups, silences, duration):
+def place_boundaries(groups, silences, duration, lang=DEFAULT_LANG):
+    cjk = LANGS[lang]['cjk']
     sents = [{'start': g[0]['t'], 'end': None, 'words': g} for g in groups]
     for k, s in enumerate(sents):
         if k == 0:
@@ -467,7 +549,7 @@ def place_boundaries(groups, silences, duration):
             'i': i + 1,
             'start': start,
             'end': end,
-            'en': ' '.join(w['text'] for w in s['words']),
+            'en': group_text(s['words'], cjk),   # 원문(일본어 레슨이면 일본어)
             'ko': '',
             'kind': 'content',
         })
@@ -476,13 +558,24 @@ def place_boundaries(groups, silences, duration):
 
 # ---------- 4. 번역 ----------
 
-TRANSLATE_PROMPT = """아래는 토익 LC 음원을 음성 인식한 영어 문장 목록이다. 각 줄은 '번호<TAB>문장' 형식이다.
+TRANSLATE_PROMPT_EN = """아래는 토익 LC 음원을 음성 인식한 영어 문장 목록이다. 각 줄은 '번호<TAB>문장' 형식이다.
 모든 문장에 대해 아래 필드를 가진 JSON 배열만 출력하라. 설명이나 코드블록 표시는 쓰지 마라.
 - i: 번호 그대로
 - en: 영어 문장. 음성 인식 오류가 명백할 때만 고친다(철자, 3.15 → 3:15 같은 시각 표기, 문맥상 어색한 단어). 보기 기호는 "A." 형태로 맞춘다. 그 외에는 그대로 둔다.
 - ko: 자연스러운 한국어 번역. 보기 기호가 있으면 번역 앞에도 "A." 형태로 붙인다.
 - kind: 시험 진행 안내(파트 설명, "Number 7.", "Look at the picture marked number 1 in your test book.", "Questions 32 through 34 refer to the following conversation." 등)는 "direction", 나머지는 "content"
 형식: [{"i":1,"en":"...","ko":"...","kind":"content"}]"""
+
+TRANSLATE_PROMPT_JA = """아래는 일본어 듣기 음원(JLPT 청해 등)을 음성 인식한 일본어 문장 목록이다. 각 줄은 '번호<TAB>문장' 형식이다.
+모든 문장에 대해 아래 필드를 가진 JSON 배열만 출력하라. 설명이나 코드블록 표시는 쓰지 마라.
+- i: 번호 그대로
+- ja: 일본어 문장. 음성 인식 오류가 명백할 때만 고친다(잘못 변환된 한자, 문맥상 어색한 단어, 빠진 「。」「、」). 그 외에는 그대로 두고, 띄어쓰기를 새로 넣지 않는다.
+- ko: 자연스러운 한국어 번역.
+- kind: 시험 진행 안내(「1番」, 「問題1」, 「まず質問を聞いてください。」, 「それから話を聞いて、問題用紙の1から4の中から、最もよいものを一つ選んでください。」 등)는 "direction", 나머지는 "content"
+형식: [{"i":1,"ja":"...","ko":"...","kind":"content"}]"""
+
+# 언어별 (번역 지시문, 응답에서 원문을 담는 키)
+TRANSLATE_PROMPTS = {'en': (TRANSLATE_PROMPT_EN, 'en'), 'ja': (TRANSLATE_PROMPT_JA, 'ja')}
 
 
 class NotLoggedIn(RuntimeError):
@@ -500,17 +593,18 @@ def _claude_env():
     return env
 
 
-def translate_chunk(chunk):
+def translate_chunk(chunk, lang=DEFAULT_LANG):
     claude = claude_bin()
     if not claude:
         raise NotLoggedIn('claude CLI를 찾을 수 없습니다. Claude Code를 설치하고 터미널에서 '
                           'claude를 실행해 /login 한 뒤 "번역 다시 하기"를 누르세요.')
+    prompt = TRANSLATE_PROMPTS[lang][0]
     lines = '\n'.join('%d\t%s' % (s['i'], s['en']) for s in chunk)
     last_err = None
     for _ in range(2):
         with tempfile.TemporaryDirectory() as tmp:
             proc = subprocess.run(
-                claude_command(claude) + ['-p', TRANSLATE_PROMPT, '--output-format', 'json',
+                claude_command(claude) + ['-p', prompt, '--output-format', 'json',
                  '--model', CLAUDE_MODEL, '--no-session-persistence'],
                 input=lines, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
                 encoding='utf-8', errors='replace', cwd=tmp, env=_claude_env(), timeout=900,
@@ -537,14 +631,15 @@ def translate_chunk(chunk):
     raise RuntimeError('번역 실패: %s' % last_err)
 
 
-def translate(sentences, on_progress=None):
+def translate(sentences, on_progress=None, lang=DEFAULT_LANG):
+    source_key = TRANSLATE_PROMPTS[lang][1]
     chunks = [sentences[i:i + TRANSLATE_CHUNK]
               for i in range(0, len(sentences), TRANSLATE_CHUNK)]
     done = [0]
     lock = threading.Lock()
 
     def work(chunk):
-        result = translate_chunk(chunk)
+        result = translate_chunk(chunk, lang)
         with lock:
             done[0] += 1
             if on_progress:
@@ -561,8 +656,8 @@ def translate(sentences, on_progress=None):
         if not t:
             continue
         s['ko'] = (t.get('ko') or '').strip()
-        if (t.get('en') or '').strip():
-            s['en'] = t['en'].strip()
+        if (t.get(source_key) or '').strip():
+            s['en'] = t[source_key].strip()
         if t.get('kind') in ('content', 'direction'):
             s['kind'] = t['kind']
 
@@ -593,7 +688,7 @@ def process(lesson_id, title=None, do_translate=True, log=print):
         set_status(d, 'transcribe')
         t0 = time.time()
         wjson = transcribe(wav16, os.path.join(d, 'whisper'),
-                           lambda f: set_status(d, 'transcribe', f))
+                           lambda f: set_status(d, 'transcribe', f), lang_of(meta))
         os.remove(wav16)
         log('음성 인식 %.1f초' % (time.time() - t0))
 
@@ -608,15 +703,16 @@ def process(lesson_id, title=None, do_translate=True, log=print):
     return read_json(os.path.join(d, 'lesson.json'))
 
 
-def segment_lesson(lesson_id, wjson, title, meta, log=print):
+def segment_lesson(lesson_id, wjson, title, meta, log=print, lang=None):
     d = lesson_dir(lesson_id)
+    lang = lang or lang_of(meta)
     set_status(d, 'segment')
     master = os.path.join(d, 'master.wav')
     duration = wav_duration(master)
     silences = detect_silences(master)
-    words = extract_words(wjson)
-    sentences = place_boundaries(split_sentences(words, silences), silences, duration)
-    lesson = {'id': lesson_id, 'title': title, 'duration': round(duration, 3),
+    words = extract_words(wjson, lang)
+    sentences = place_boundaries(split_sentences(words, silences, lang), silences, duration, lang)
+    lesson = {'id': lesson_id, 'title': title, 'lang': lang, 'duration': round(duration, 3),
               'created': meta.get('created', time.time()), 'sentences': sentences}
     write_json(os.path.join(d, 'lesson.json'), lesson)
     log('문장 %d개' % len(sentences))
@@ -630,9 +726,9 @@ def resegment(lesson_id, do_translate=True, log=print):
     old = read_json(os.path.join(d, 'lesson.json'), {}) or {}
     title = old.get('title') or meta.get('title') or lesson_id
     try:
-        with open(os.path.join(d, 'whisper.json'), encoding='utf-8') as f:
-            wjson = json.load(f)
-        sentences = segment_lesson(lesson_id, wjson, title, meta, log)
+        wjson = load_whisper_json(os.path.join(d, 'whisper.json'))
+        lang = old.get('lang') if old.get('lang') in LANGS else lang_of(meta)
+        sentences = segment_lesson(lesson_id, wjson, title, meta, log, lang)
     except Exception as e:
         set_status(d, 'error', error=str(e)[-800:])
         raise
@@ -651,7 +747,7 @@ def translate_lesson(lesson_id, log=print):
     set_status(d, 'translate')
     t0 = time.time()
     try:
-        translate(lesson['sentences'], lambda f: set_status(d, 'translate', f))
+        translate(lesson['sentences'], lambda f: set_status(d, 'translate', f), lang_of(lesson))
     except Exception as e:
         set_status(d, 'done', error=str(e)[-800:])
         log('번역 실패: %s' % e)
@@ -662,8 +758,10 @@ def translate_lesson(lesson_id, log=print):
     return True
 
 
-def import_file(path, title=None):
+def import_file(path, title=None, lang=DEFAULT_LANG):
     """mp3를 data/<id>/source.<ext>로 복사하고 id를 돌려준다."""
+    if lang not in LANGS:
+        raise ValueError('지원하지 않는 언어입니다: %s' % lang)
     lesson_id = new_lesson_id(path)
     d = lesson_dir(lesson_id)
     os.makedirs(d)
@@ -671,7 +769,7 @@ def import_file(path, title=None):
     shutil.copyfile(path, os.path.join(d, 'source' + ext))
     write_json(os.path.join(d, 'meta.json'), {
         'title': title or os.path.splitext(os.path.basename(path))[0],
-        'created': time.time()})
+        'lang': lang, 'created': time.time()})
     set_status(d, 'queued')
     return lesson_id
 
@@ -711,6 +809,7 @@ def main():
     ap = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     ap.add_argument('audio', nargs='?')
     ap.add_argument('--title')
+    ap.add_argument('--lang', choices=sorted(LANGS), default=DEFAULT_LANG, help='음원 언어 (기본 en)')
     ap.add_argument('--no-translate', action='store_true')
     ap.add_argument('--retranslate', metavar='LESSON_ID', help='이미 처리한 레슨의 번역만 다시')
     ap.add_argument('--resegment', metavar='LESSON_ID', help='받아쓰기는 그대로 두고 문장 나누기와 번역을 다시')
@@ -723,7 +822,7 @@ def main():
         translate_lesson(lesson_id)
         lesson = read_json(os.path.join(lesson_dir(lesson_id), 'lesson.json'))
     elif args.audio:
-        lesson_id = import_file(args.audio, args.title)
+        lesson_id = import_file(args.audio, args.title, args.lang)
         print('레슨 id:', lesson_id)
         lesson = process(lesson_id, do_translate=not args.no_translate)
     else:

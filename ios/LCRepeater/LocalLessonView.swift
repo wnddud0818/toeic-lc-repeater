@@ -10,10 +10,13 @@ struct LocalLessonView: View {
     @State private var checking = true
     @State private var availabilityError: String?
     @State private var configuration: TranslationSession.Configuration?
+    @AppStorage("lcr.localLessonLanguage") private var languageCode = StudyLanguage.english.rawValue
     @Binding var incomingAudio: URL?
     @Binding var incomingError: String?
     let onBusyChange: (Bool) -> Void
     let onComplete: (UUID) -> Void
+
+    private var language: StudyLanguage { StudyLanguage(rawValue: languageCode) ?? .english }
 
     var body: some View {
         NavigationStack {
@@ -21,9 +24,16 @@ struct LocalLessonView: View {
                 Section {
                     Label("기기에서 시작하기", systemImage: "iphone.gen3.radiowaves.left.and.right")
                         .font(.title2.bold()).padding(.vertical, 8)
-                    Text("영어 음원에서 문장을 나누고 한국어 번역까지 이 기기에서 처리해요.")
-                    Text("처음에는 영어 전사·영한 번역 모델을 내려받아요. 준비된 뒤에는 오프라인으로 처리할 수 있어요.")
+                    Text("\(language.name) 음원에서 문장을 나누고 한국어 번역까지 이 기기에서 처리해요.")
+                    Text("처음에는 \(language.name) 전사·한국어 번역 모델을 내려받아요. 준비된 뒤에는 오프라인으로 처리할 수 있어요.")
                         .font(.subheadline).foregroundStyle(.secondary)
+                }
+                Section("음원 언어") {
+                    Picker("음원 언어", selection: Binding(get: { language }, set: { languageCode = $0.rawValue })) {
+                        ForEach(StudyLanguage.allCases) { Text($0.name).tag($0) }
+                    }
+                    .pickerStyle(.segmented).labelsHidden()
+                    .disabled(processor.isBusy)
                 }
                 if checking {
                     Section { HStack { ProgressView(); Text("이 기기의 지원 여부를 확인하고 있어요") } }
@@ -42,7 +52,7 @@ struct LocalLessonView: View {
                                systemImage: "doc.badge.plus") { showingPicker = true }
                             .disabled(processor.isBusy)
                     } footer: {
-                        Text("MP3·M4A·WAV 등의 영어 음원을 ‘파일’ 앱에서 선택해 주세요.")
+                        Text("MP3·M4A·WAV 등의 \(language.name) 음원을 ‘파일’ 앱에서 선택해 주세요.")
                     }
                     if processor.sourceURL != nil {
                         Section {
@@ -93,7 +103,16 @@ struct LocalLessonView: View {
                 await MainActor.run { onComplete(id) }
             }
         }
-        .task { await checkAvailability() }
+        .task {
+            processor.setLanguage(language)
+            await checkAvailability()
+        }
+        .onChange(of: languageCode) { _, _ in
+            guard !processor.isBusy else { return }
+            processor.setLanguage(language)
+            configuration = nil  // The next start builds a session for the new language pair.
+            Task { await checkAvailability() }
+        }
         .onChange(of: incomingAudio) { _, _ in acceptIncomingAudio() }
         .onChange(of: processor.isBusy) { _, busy in
             UIApplication.shared.isIdleTimerDisabled = busy
@@ -110,13 +129,16 @@ struct LocalLessonView: View {
     }
 
     private func start() {
-        if configuration == nil { configuration = LocalLessonProcessor.configuration() }
+        if configuration == nil { configuration = LocalLessonProcessor.configuration(for: processor.language) }
         else { configuration?.invalidate() }
     }
 
     private func checkAvailability() async {
         checking = true
-        availabilityError = await LocalLessonProcessor.availabilityError()
+        let checked = language
+        let message = await LocalLessonProcessor.availabilityError(for: checked)
+        guard checked == language else { return }  // The language changed while checking.
+        availabilityError = message
         checking = false
         acceptIncomingAudio()
     }

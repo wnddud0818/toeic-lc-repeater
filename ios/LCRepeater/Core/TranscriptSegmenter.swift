@@ -9,9 +9,12 @@ struct TimedTranscriptPiece: Sendable, Equatable {
 /// Keep Apple's audio times; only interpolate when one timed run contains several words.
 /// This module has no model/network dependency and is shared with the contract tests.
 enum TranscriptSegmenter {
-    static func sentences(from pieces: [TimedTranscriptPiece], duration: Double) throws -> [Sentence] {
+    static func sentences(from pieces: [TimedTranscriptPiece], duration: Double,
+                          language: StudyLanguage = .english) throws -> [Sentence] {
         guard duration.isFinite, duration > 0 else { throw LessonError.invalidAudio }
-        let expression = try NSRegularExpression(pattern: #"\S+"#)
+        // Japanese has no spaces, so a timed run is split at sentence-ending punctuation instead.
+        let expression = try NSRegularExpression(pattern: language == .japanese
+            ? #"[^\s。．？！?!]*[。．？！?!]+[」』）)"]*|[^\s。．？！?!]+"# : #"\S+"#)
         var words: [TimedTranscriptPiece] = []
         for piece in pieces {
             guard piece.start.isFinite, piece.end.isFinite,
@@ -36,7 +39,7 @@ enum TranscriptSegmenter {
                 current = []
             }
             current.append(word)
-            if endsSentence(word.text), current.count > 1 || !isChoice(word.text) {
+            if endsSentence(word.text, language), current.count > 1 || language == .japanese || !isChoice(word.text) {
                 groups.append(current)
                 current = []
             }
@@ -50,9 +53,9 @@ enum TranscriptSegmenter {
             let start = max(0, max(first.start - 0.08, min(first.start, previousEnd)))
             let end = min(duration, min(last.end + 0.12, max(last.end, nextStart)))
             guard end > start else { continue }
-            let text = group.map(\.text).joined(separator: " ")
+            let text = join(group.map(\.text), language)
             result.append(.init(i: result.count + 1, start: start, end: end, en: text, ko: "",
-                                kind: isDirection(text) ? "direction" : "content"))
+                                kind: isDirection(text, language) ? "direction" : "content"))
         }
         guard !result.isEmpty else { throw LocalLessonError.noSpeech }
         guard result.count <= 50_000 else { throw LessonError.invalidLesson }
@@ -63,28 +66,51 @@ enum TranscriptSegmenter {
         text.range(of: #"^\(?[A-D][.)]$"#, options: .regularExpression) != nil
     }
 
-    private static func endsSentence(_ text: String) -> Bool {
+    /// Japanese words are joined directly, keeping a space only between two Latin words or numbers.
+    private static func join(_ words: [String], _ language: StudyLanguage) -> String {
+        guard language == .japanese else { return words.joined(separator: " ") }
+        var text = ""
+        for word in words {
+            if let last = text.unicodeScalars.last, let first = word.unicodeScalars.first,
+               last.isASCII, first.isASCII,
+               CharacterSet.alphanumerics.contains(last), CharacterSet.alphanumerics.contains(first) {
+                text += " "
+            }
+            text += word
+        }
+        return text
+    }
+
+    private static func endsSentence(_ text: String, _ language: StudyLanguage) -> Bool {
+        if language == .japanese {
+            return text.range(of: #"[。．？！?!][」』）)"]*$"#, options: .regularExpression) != nil
+        }
         let abbreviations = ["mr.", "mrs.", "ms.", "dr.", "st.", "jr.", "sr.", "a.m.", "p.m.", "e.g.", "i.e.", "no."]
         return !abbreviations.contains(text.lowercased()) && !isChoice(text)
             && text.range(of: #"[.!?][\"')\]]*$"#, options: .regularExpression) != nil
     }
 
-    private static func isDirection(_ text: String) -> Bool {
-        text.lowercased().range(of: #"^(directions\b|part\s+(one|two|three|four|[1-4])\b|number\s+\d+\b|questions?\s+\d+.*(through|refer)|listen\s+to\s+the\s+(following|conversation|talk)|look\s+at\s+the\s+(picture|photograph))"#,
+    private static func isDirection(_ text: String, _ language: StudyLanguage) -> Bool {
+        if language == .japanese {
+            // Only a sentence that is nothing but an item number, such as "1番。" or "問題2".
+            return text.range(of: #"^\s*([0-9０-９一二三四五六七八九十]+\s*番|問題\s*[0-9０-９一二三四五六七八九十]+)[。．、\s]*$"#,
+                              options: .regularExpression) != nil
+        }
+        return text.lowercased().range(of: #"^(directions\b|part\s+(one|two|three|four|[1-4])\b|number\s+\d+\b|questions?\s+\d+.*(through|refer)|listen\s+to\s+the\s+(following|conversation|talk)|look\s+at\s+the\s+(picture|photograph))"#,
                                options: .regularExpression) != nil
     }
 }
 
 enum LocalLessonError: LocalizedError {
-    case unsupportedDevice, unsupportedEnglish, unsupportedTranslation, noSpeech, invalidAudio, audioTooLarge
-    case incompleteTranslation
+    case unsupportedDevice, noSpeech, invalidAudio, audioTooLarge, incompleteTranslation
+    case unsupportedSpeech(StudyLanguage), unsupportedTranslation(StudyLanguage)
 
     var errorDescription: String? {
         switch self {
         case .unsupportedDevice: return "이 기기는 애플의 기기 내 전사 기능을 지원하지 않아요. 컴퓨터에서 준비한 레슨을 가져와 주세요."
-        case .unsupportedEnglish: return "이 기기에서 영어 전사 모델을 사용할 수 없어요."
-        case .unsupportedTranslation: return "이 기기에서 영어→한국어 번역 모델을 사용할 수 없어요."
-        case .noSpeech: return "영어 음성을 찾지 못했어요. 다른 음원으로 다시 시도해 주세요."
+        case .unsupportedSpeech(let language): return "이 기기에서 \(language.name) 전사 모델을 사용할 수 없어요."
+        case .unsupportedTranslation(let language): return "이 기기에서 \(language.name)→한국어 번역 모델을 사용할 수 없어요."
+        case .noSpeech: return "음성을 찾지 못했어요. 음원 언어가 맞는지 확인하거나 다른 음원으로 다시 시도해 주세요."
         case .invalidAudio: return "이 음원을 읽을 수 없어요. MP3, M4A, WAV 파일로 다시 선택해 주세요."
         case .audioTooLarge: return "처리할 음원이 너무 커요. 원본은 1GB, 변환된 음원은 2GB 이하여야 해요."
         case .incompleteTranslation: return "일부 문장의 번역을 받지 못했어요. 번역을 다시 시도해 주세요."

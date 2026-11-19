@@ -29,14 +29,14 @@ struct AppHomeView: View {
                                 .font(.system(size: 48, weight: .medium)).foregroundStyle(.tint)
                                 .padding(.top, 28).accessibilityHidden(true)
                             Text("어디에서 시작할까요?").font(.largeTitle.bold())
-                            Text("영어를 듣고, 한 문장씩 내 속도로 반복해요.")
+                            Text("영어·일본어를 듣고, 한 문장씩 내 속도로 반복해요.")
                                 .foregroundStyle(.secondary)
                             choice("컴퓨터에서 불러오기", subtitle: "PC에서 준비한 .lcrlesson 파일 가져오기",
                                    icon: "desktopcomputer.and.arrow.down") {
                                 openLessonID = nil
                                 showingLibrary = true
                             }
-                            choice("기기에서 시작하기", subtitle: "음원을 선택하고 영어 전사·한국어 번역하기",
+                            choice("기기에서 시작하기", subtitle: "영어·일본어 음원을 전사하고 한국어로 번역하기",
                                    icon: "iphone.gen3") { showingDevice = true }
                             if !library.entries.isEmpty {
                                 Button("내 레슨 \(library.entries.count)개 보기", systemImage: "books.vertical") {

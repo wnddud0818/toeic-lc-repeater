@@ -40,7 +40,7 @@ struct LibraryView: View {
                                             .frame(width: 36)
                                         VStack(alignment: .leading, spacing: 5) {
                                             Text(entry.lesson.title).font(.headline).lineLimit(2)
-                                            Text("\(entry.lesson.sentences.count)문장 · \(Int(entry.lesson.duration / 60))분 · 오프라인")
+                                            Text("\(entry.lesson.language == .english ? "" : entry.lesson.language.name + " · ")\(entry.lesson.sentences.count)문장 · \(Int(entry.lesson.duration / 60))분 · 오프라인")
                                                 .font(.caption).foregroundStyle(.secondary)
                                         }
                                         .padding(.vertical, 6)

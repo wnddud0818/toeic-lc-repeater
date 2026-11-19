@@ -63,6 +63,18 @@ class ExportTests(unittest.TestCase):
                 with self.assertRaises(E.ExportError):
                     E.validate_lesson(lesson, 2.0)
 
+    def test_japanese_lesson_keeps_language_and_unknown_language_is_rejected(self):
+        lesson = json.loads(json.dumps(self.lesson))
+        lesson['lang'] = 'ja'
+        lesson['sentences'][1].update(en='こんにちは。', ko='안녕하세요.')
+        (self.folder / 'lesson.json').write_text(json.dumps(lesson, ensure_ascii=False), encoding='utf-8')
+        data = E.export_file(self.folder, self.root / 'ja.lcrlesson').read_bytes()
+        length, = struct.unpack('<Q', data[8:16])
+        self.assertEqual(json.loads(data[16:16 + length])['lesson'], lesson)
+        lesson['lang'] = 'fr'
+        with self.assertRaises(E.ExportError):
+            E.validate_lesson(lesson, 2.0)
+
     def test_export_cannot_overwrite_source_audio(self):
         before = (self.folder / 'master.wav').read_bytes()
         with self.assertRaises(E.ExportError):

@@ -82,7 +82,7 @@ struct PlayerView: View {
 
     @ViewBuilder
     private func listening(_ sentence: Sentence) -> some View {
-        SentenceCard(sentence: sentence, position: player.position,
+        SentenceCard(sentence: sentence, language: entry.lesson.language, position: player.position,
                      count: player.visibleSentences.count)
             .id("\(entry.id.uuidString):\(sentence.i)")
 
@@ -170,6 +170,7 @@ struct PlayerView: View {
 
 private struct SentenceCard: View {
     let sentence: Sentence
+    let language: StudyLanguage
     let position: Int
     let count: Int
     @State private var face = Face.blurredEnglish
@@ -185,19 +186,20 @@ private struct SentenceCard: View {
             }
         }
 
-        var hint: String {
+        // `blurredEnglish`/`english` mean the hidden/shown source text, whatever its language.
+        func hint(_ language: StudyLanguage) -> String {
             switch self {
-            case .blurredEnglish: return "탭하면 영어 공개"
+            case .blurredEnglish: return "탭하면 \(language.name) 공개"
             case .english: return "탭하면 한국어"
-            case .korean: return "탭하면 영어 가리기"
+            case .korean: return "탭하면 \(language.name) 가리기"
             }
         }
 
-        var accessibilityLabel: String {
+        func accessibilityLabel(_ language: StudyLanguage) -> String {
             switch self {
-            case .blurredEnglish: return "영어가 가려진 문장. 탭하면 영어 공개"
-            case .english: return "영어 문장. 탭하면 한국어"
-            case .korean: return "한국어 문장. 탭하면 영어 가리기"
+            case .blurredEnglish: return "\(language.name)가 가려진 문장. 탭하면 \(language.name) 공개"
+            case .english: return "\(language.name) 문장. 탭하면 한국어"
+            case .korean: return "한국어 문장. 탭하면 \(language.name) 가리기"
             }
         }
     }
@@ -214,7 +216,7 @@ private struct SentenceCard: View {
                 HStack {
                     Text("\(position + 1) / \(count)")
                     Spacer()
-                    Text(face == .korean ? "KO" : "EN").fontWeight(.bold)
+                    Text(face == .korean ? "KO" : language.badge).fontWeight(.bold)
                 }
                 .font(.caption).foregroundStyle(.secondary)
                 Text(text)
@@ -225,7 +227,7 @@ private struct SentenceCard: View {
                 HStack {
                     if sentence.kind == "direction" { Text("시험 안내").foregroundStyle(.orange) }
                     Spacer()
-                    Text(face.hint)
+                    Text(face.hint(language))
                 }
                 .font(.caption).foregroundStyle(.secondary)
             }
@@ -235,7 +237,7 @@ private struct SentenceCard: View {
         }
         .buttonStyle(.plain)
         .accessibilityElement(children: .ignore)
-        .accessibilityLabel(face.accessibilityLabel)
+        .accessibilityLabel(face.accessibilityLabel(language))
         .accessibilityValue(face == .blurredEnglish ? "" : text)
     }
 }

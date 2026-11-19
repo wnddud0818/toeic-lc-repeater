@@ -4,14 +4,14 @@ import AVFoundation
 
 @available(iOS 26.0, *)
 actor AppleSpeechTranscription {
-    static func englishLocale() async -> Locale? {
-        await SpeechTranscriber.supportedLocale(equivalentTo: Locale(identifier: "en-US"))
+    static func locale(for language: StudyLanguage) async -> Locale? {
+        await SpeechTranscriber.supportedLocale(equivalentTo: Locale(identifier: language.speechLocaleIdentifier))
     }
 
-    func transcribe(audioURL: URL, duration: Double,
+    func transcribe(audioURL: URL, duration: Double, language: StudyLanguage,
                     progress: @escaping @Sendable (Double) async -> Void) async throws -> [TimedTranscriptPiece] {
         guard SpeechTranscriber.isAvailable else { throw LocalLessonError.unsupportedDevice }
-        guard let locale = await Self.englishLocale() else { throw LocalLessonError.unsupportedEnglish }
+        guard let locale = await Self.locale(for: language) else { throw LocalLessonError.unsupportedSpeech(language) }
         let transcriber = SpeechTranscriber(locale: locale, transcriptionOptions: [],
                                             reportingOptions: [], attributeOptions: [.audioTimeRange])
         try await AssetInventory.reserve(locale: locale)

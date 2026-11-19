@@ -22,6 +22,7 @@ MAGIC = b'LCRLESS1'
 MAX_MANIFEST = 8 * 1024 * 1024
 MAX_AUDIO = 2 * 1024 ** 3
 CHUNK = 1024 * 1024
+LANGS = ('en', 'ja')   # pipeline.LANGS와 같게 둔다. 없으면 영어(예전 레슨)
 
 
 class ExportError(ValueError):
@@ -40,6 +41,8 @@ def validate_lesson(lesson, audio_duration):
     duration = lesson.get('duration')
     if not _number(duration) or duration <= 0 or abs(duration - audio_duration) > 0.05:
         raise ExportError('레슨과 음원의 길이가 일치하지 않습니다')
+    if 'lang' in lesson and lesson['lang'] not in LANGS:
+        raise ExportError('레슨 언어가 잘못되었습니다')
     if not _number(lesson.get('created')):
         raise ExportError('레슨 생성 시각이 잘못되었습니다')
     sentences = lesson.get('sentences')

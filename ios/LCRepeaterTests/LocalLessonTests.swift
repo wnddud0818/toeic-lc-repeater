@@ -43,6 +43,40 @@ final class LocalLessonTests: XCTestCase {
         XCTAssertThrowsError(try TranscriptSegmenter.sentences(from: [], duration: 2))
     }
 
+    func testJapaneseSplitsAtJapanesePunctuationAndJoinsWithoutSpaces() throws {
+        let sentences = try TranscriptSegmenter.sentences(from: [
+            .init(text: "すみません、", start: 1, end: 1.6), .init(text: "駅はどこですか？", start: 1.6, end: 2.8),
+            .init(text: "まっすぐ行って", start: 3, end: 3.8), .init(text: "ください。", start: 3.8, end: 4.3),
+            .init(text: "2番", start: 5.2, end: 5.6)
+        ], duration: 6, language: .japanese)
+        XCTAssertEqual(sentences.map(\.en), ["すみません、駅はどこですか？", "まっすぐ行ってください。", "2番"])
+        XCTAssertEqual(sentences.map(\.kind), ["content", "content", "direction"])
+    }
+
+    func testJapaneseRunWithSeveralSentencesIsInterpolatedAndKeepsLatinSpaces() throws {
+        let sentences = try TranscriptSegmenter.sentences(from: [
+            .init(text: "はい。そうです。", start: 0, end: 2),
+            .init(text: "iPhone 15を買いました。", start: 3, end: 5)
+        ], duration: 5, language: .japanese)
+        XCTAssertEqual(sentences.map(\.en), ["はい。", "そうです。", "iPhone 15を買いました。"])
+        XCTAssertLessThan(sentences[0].end, 1)
+        XCTAssertTrue(sentences.allSatisfy { $0.kind == "content" })
+    }
+
+    func testLessonLanguageDefaultsToEnglishAndRejectsUnknownCodes() throws {
+        let base = #"{"id":"a","title":"t","duration":3,"created":1,"sentences":[{"i":1,"start":0,"end":1,"en":"x","ko":"","kind":"content"}]"#
+        let old = try JSONDecoder().decode(Lesson.self, from: Data((base + "}").utf8))
+        XCTAssertNil(old.lang)
+        XCTAssertEqual(old.language, .english)
+        let japanese = try JSONDecoder().decode(Lesson.self, from: Data((base + #","lang":"ja"}"#).utf8))
+        XCTAssertEqual(japanese.language, .japanese)
+        XCTAssertNoThrow(try japanese.validate())
+        let roundTrip = try JSONDecoder().decode(Lesson.self, from: JSONEncoder().encode(japanese))
+        XCTAssertEqual(roundTrip, japanese)
+        let unknown = try JSONDecoder().decode(Lesson.self, from: Data((base + #","lang":"fr"}"#).utf8))
+        XCTAssertThrowsError(try unknown.validate())
+    }
+
     func testTranslationMatchesIDsWhenResponsesAreReordered() throws {
         let lesson = sample()
         let updated = try LessonTranslation.applying([.init(id: 2, text: "둘"), .init(id: 1, text: "하나")],
