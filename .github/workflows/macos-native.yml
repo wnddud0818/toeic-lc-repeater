@@ -113,7 +113,9 @@ jobs:
           engine "$RUNNER_TEMP/en.jsonl" transcribe "$RUNNER_TEMP/en.aiff" --lang en --work "$RUNNER_TEMP/work-en"
           check "$RUNNER_TEMP/en.jsonl" en
           say -v '?' | grep -i 'ja_JP' || true
-          LCR_JA_VOICE=$(say -v '?' | awk '/ja_JP/ {print $1; exit}')
+          # Voices such as "Eddy (Japanese (Japan))" share a name with English voices; `say -v Eddy` picks the
+          # English one and writes silence. Use a voice whose plain name is Japanese-only (Kyoko, ...).
+          LCR_JA_VOICE=$(say -v '?' | awk '$2 == "ja_JP" {print $1; exit}')
           if [ -n "$LCR_JA_VOICE" ]; then
             say -v "$LCR_JA_VOICE" -o "$RUNNER_TEMP/ja.aiff" "すみません、駅はどこですか。まっすぐ行ってください。"
             ls -l "$RUNNER_TEMP/ja.aiff"
